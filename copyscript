@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# Check if argument is given
+if [ -z "$1" ]; then
+    echo "Usage: $0 /path/to/directory"
+    exit 1
+fi
+
+DIR="$1"
+
+# Check if the directory exists
+if [ ! -d "$DIR" ]; then
+    echo "Error: '$DIR' is not a valid directory."
+    exit 1
+fi
+
+# Temporary file to hold combined output
+TMP_FILE=$(mktemp)
+
+# Iterate over files in the directory
+for FILE in "$DIR"/*; do
+    if [[ -f "$FILE" ]]; then
+        echo "========================================" >> "$TMP_FILE"
+        echo "File: $(basename "$FILE")" >> "$TMP_FILE"
+        echo "========================================" >> "$TMP_FILE"
+        cat "$FILE" >> "$TMP_FILE"
+        echo -e "\n" >> "$TMP_FILE"
+    fi
+done
+
+# Copy to clipboard
+if command -v pbcopy &> /dev/null; then
+    cat "$TMP_FILE" | pbcopy
+elif command -v wl-copy &> /dev/null; then
+    cat "$TMP_FILE" | wl-copy
+else
+    echo "No clipboard utility found. Please install pbcopy (macOS), xclip or xsel (Linux)."
+    rm "$TMP_FILE"
+    exit 1
+fi
+
+echo "Content of all files in '$DIR' copied to clipboard."
+
+# Cleanup
+rm "$TMP_FILE"

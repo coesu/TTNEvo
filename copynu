@@ -1,0 +1,22 @@
+#!/usr/bin/env nu
+# list_jl_files.nu
+
+# List all .jl files in subdirectories and print their content with headers, then copy to clipboard.
+
+ls .
+| where type == dir
+| each {|dir|
+    ls $dir.name
+}
+| flatten
+| where type == file
+| where name ends-with ".jl"
+| each {|file|
+    $"
+========================================
+File: $($file.name)
+========================================
+" + (open $file.name | into string)
+}
+| str join "\n"
+| wl-copy
