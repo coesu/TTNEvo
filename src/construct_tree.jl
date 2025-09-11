@@ -1,5 +1,6 @@
 using Graphs
 using NamedGraphs: NamedGraph
+using NamedGraphs.GraphsExtensions: add_edge
 using ITensorNetworks
 using LinearAlgebra
 using JLD2
@@ -26,6 +27,13 @@ Base.@kwdef struct TreeGraph <: AbstractQuantumGraph
 end
 
 Base.@kwdef struct SnakeGraph <: AbstractQuantumGraph
+  L::Int  # Linear dimension of the 2D square grid
+  gridnum::Int  # Grid number for field generation
+  with_ancilla::Bool = false  # Whether to include ancilla sites
+  full_interaction::Bool = true
+end
+
+Base.@kwdef struct HilbertCurve <: AbstractQuantumGraph
   L::Int  # Linear dimension of the 2D square grid
   gridnum::Int  # Grid number for field generation
   with_ancilla::Bool = false  # Whether to include ancilla sites
@@ -230,6 +238,74 @@ function _build_graph(graph_type::SnakeGraph)
   end
 
   return g_snake, h_grid
+end
+
+function _build_graph(graph_type::HilbertCurve)
+  L = graph_type.L
+  gridnum = graph_type.gridnum
+
+  local h_grid
+  try
+    data = load(joinpath("data", "grid", "L=$(L)_gridnum=$gridnum.jld2"))
+    h_grid = data["grid"]
+  catch
+    h_grid = rand(L, L)
+  end
+
+  s = hilbert_curve("A", log2(L))
+  g = parse_hilbert_curve(s, L)
+  return g, h_grid
+end
+
+function hilbert_expand(seed::AbstractString, order::Int)
+  rules = Dict(
+    'A' => "+BF-AFA-FB+",
+    'B' => "-AF+BFB+FA-",
+  )
+  s = seed
+  for _ in 1:order
+    s = join(get(rules, c, string(c)) for c in s)  # passthrough F,+,-
+  end
+  return s
+end
+function parse_hilbert_curve(s, L)
+  x, y = 1, 1
+  # directions: 0=right, 1=up, 2=left, 3=down
+  dir_ = 1
+  dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+  points = [(x, y)]
+  for ch in s
+    if ch == 'F'
+      dx, dy = dirs[dir_]
+      x, y = x + dx, y + dy
+      push!(points, (x, y))
+    elseif ch == '+'  # left turn 90°
+      dir_ = mod1(dir_ + 1, 4)
+    elseif ch == '-'  # right turn 90°
+      dir_ = mod1(dir_ - 1, 4)
+    end
+  end
+
+  g = NamedGraph()
+  for p in points
+    add_vertex!(g, p)
+  end
+  for (i, p) in enumerate(points[1:end-1])
+    add_edge!(g, points[i] => points[i+1])
+  end
+  return g
+end
+
+function hilbert_curve(current, order)
+  if order <= 0
+    return current
+  end
+  rules = Dict(
+    'A' => "+BF-AFA-FB+",
+    'B' => "-AF+BFB+FA-",
+  )
+  new = join([get(rules, c, string(c)) for c in current])
+  return hilbert_curve(new, order - 1)
 end
 
 function build_random_graph(graph_type::TreeGraph; rng=nothing)

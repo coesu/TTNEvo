@@ -1,10 +1,15 @@
-using ITensorNetworks: AbstractTTN, tree_orthogonalize, linkinds, tebd, random_ttn
+using ITensorNetworks: AbstractTTN, tree_orthogonalize, linkinds, tebd, random_ttn, siteinds
 using ITensorNetworks
 using ITensorNetworks.ITensorsExtensions: group_terms
 using ITensors: Algorithm, unwrap_array_type, δ, scalartype, Trotter, commontags, svd
+using ITensors: AlgorithmSelection
 using Adapt: adapt
 
 export expand
+
+macro Algorithm_str(s)
+  return :(Algorithm{$(Expr(:quote, Symbol(s)))})
+end
 
 function expand(state, reference; alg, kwargs...)
   return expand(Algorithm(alg), state, reference; kwargs...)
@@ -17,7 +22,7 @@ function expand(
   ::Algorithm"orthogonalize",
   state::AbstractTTN,
   references::Vector{AbstractTTN};
-  cutoff=10e-12,
+  cutoff=1e-12,
 )
   maxbond = max_linkdim(state)
 
@@ -85,20 +90,50 @@ function expand(
   operator::AbstractTTN,
   g;
   krylovdim=2,
-  cutoff=10e-12,
+  cutoff=1e-12,
   apply_kwargs=(),
 )
   references = Vector{AbstractTTN}(undef, krylovdim)
   for k in 1:krylovdim
     previous_reference = get(references, k - 1, state)
     # @time references[k] = apply(
-    #   operator, previous_reference; init=previous_reference, maxdim=100
+    #   operator, previous_reference; init=previous_reference, maxdim=16, alg=:fit
     # )
-    @time references[k] = apply_tto(operator, previous_reference, g; apply_kwargs...)
+    @time references[k] = apply_tto(operator, previous_reference, g; maxdim=16)
     maxbond = max_linkdim(references[k])
   end
   return expand(state, references; alg="orthogonalize", cutoff)
 end
+
+function contract_tto(A::AbstractTTN, ψ::AbstractTTN, g; truncation=true, kwargs...)
+  N = length(A)
+  if N != length(ψ)
+    @warn (DimensionMismatch("lengths of MPO ($N) and MPS ($(length(ψ))) do not match"))
+  end
+  ψ_out = ttn(g)
+
+  for j in vertices(g)
+    ψ_out[j] = A[j] * ψ[j]
+  end
+
+  for b in edges(g)
+    Al = commoninds(A[src(b)], A[dst(b)])
+    tt = tags(Al[1])
+    ψl = commoninds(ψ[src(b)], ψ[dst(b)])
+    l = [Al..., ψl...]
+    if !isempty(l)
+      C = combiner(l; tags=tt)
+      ψ_out[src(b)] *= C
+      ψ_out[dst(b)] *= dag(C)
+    end
+  end
+  if truncation
+    ψ_out = truncate(ψ_out; kwargs...)
+  end
+  return ψ_out
+end
+
+apply_tto(A, B, g; kwargs...) = replaceprime(contract_tto(A, B, g; kwargs...), 1 => 0)
 
 function trivial_expand(state; expansion_dim=2, cutoff=10e-12, apply_kwargs=())
   s = siteinds(state)

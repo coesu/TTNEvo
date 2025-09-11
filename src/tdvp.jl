@@ -170,6 +170,9 @@ function my_tdvp(
         state, projected_operator, edgetype(state)(first(edge), last(edge))
       )
     end
+    if max_linkdim(state) > maxdim
+      state = truncate(state; maxdim)
+    end
   end
 
   for s in sweeps

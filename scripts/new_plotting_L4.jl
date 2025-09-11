@@ -36,6 +36,8 @@ function columnar_imbalance_ed(sz_matrix, L)
   return imbalances
 end
 
+export columnar_imbalance_ed
+
 function get_ed_benchmark(L, h, gridnums)
   ed_trajectories = []
   common_gridnums_with_ed = []

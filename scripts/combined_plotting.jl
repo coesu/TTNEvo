@@ -70,6 +70,8 @@ width_cm, height_cm = 4cm, 12cm   # single-column figure size
 pixel = (width_cm, height_cm)
 individual_size = (8cm, 4cm)
 
+labels = Dict("FreeGraph" => "TTN", "SnakeGraph" => "MPS")
+
 set_theme!(merge(publication_theme(), theme_latexfonts()))
 
 function moving_average(data::AbstractVector, window::Int)
@@ -95,6 +97,271 @@ function moving_average(data::AbstractVector, window::Int)
 end
 
 """
+  columnar_imbalance_ed(sz_matrix, L)
+
+Compute columnar imbalance from ED `sz_expectations` matrix shaped (time, sites).
+"""
+function columnar_imbalance_ed(sz_matrix, L)
+  imbalances = Float64[]
+  for t in 1:size(sz_matrix, 1)
+    sz_t = sz_matrix[t, :]
+    N = L * L
+    @assert length(sz_t) == N
+    sublattice_A = 0.0
+    sublattice_B = 0.0
+    for i in 1:N
+      x = (i - 1) % L + 1
+      # y = div(i - 1, L) + 1  # unused for columnar
+      if iseven(x)
+        sublattice_A += sz_t[i]
+      else
+        sublattice_B += sz_t[i]
+      end
+    end
+    imbalance = (sublattice_A - sublattice_B) / (0.5 * N)
+    push!(imbalances, imbalance)
+  end
+  return imbalances
+end
+
+"""
+  plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}=nothing)
+
+Load a single simulation from `sim_dir` (expects a JLD2 saved by run_simulation/save_simulation_data)
+and plot ED − TN of the columnar imbalance for the same L, h, gridnum.
+
+Saves a PDF and PNG under `plots/single_with_ed/<basename>` unless `outfile` is provided.
+Returns the Makie Figure.
+"""
+function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}=nothing)
+  # Find a finished result if available, otherwise any JLD2 file
+  @assert isdir(sim_dir) "Directory not found: $(sim_dir)"
+  files = filter(f -> endswith(f, ".jld2"), readdir(sim_dir))
+  @assert !isempty(files) "No .jld2 files found in $(sim_dir)"
+  finished = filter(f -> occursin("finished_results", f), files)
+  file = isempty(finished) ? files[1] : finished[1]
+  fullpath = joinpath(sim_dir, file)
+
+  cfg = nothing
+  try
+    cfg = jldopen(fullpath, "r") do io
+      return io["config"]
+    end
+  catch e
+    error("Failed to load config from $(fullpath): $(e)")
+  end
+
+  # Extract simulation info
+  L = cfg.graph.L
+  h = cfg.model.h
+  grid = cfg.graph.gridnum
+  times = cfg.observer.times
+  sim_imb = TTNEvo.columnar_imbalance_total(cfg.observer.sz)
+
+  # Load ED series for same parameters
+  ed_imb = nothing
+  function _load_ed(L, h, grid)
+    # Try the commonly used ED paths
+    p1 = joinpath(@__DIR__, "../../heisenberg_ed/data/fun_results_columnar_Lx=$(L)_Ly=$(L)_hmax=$(h)_gridnum=$(grid).jld2")
+    p2 = joinpath(@__DIR__, "../../heisenberg_ed/data/results_columnar_Lx=$(L)_Ly=$(L)_hmax=$(h)_gridnum=$(grid).jld2")
+    if isfile(p1)
+      d = load(p1)
+      return columnar_imbalance_ed(d["sz_expectations"], L)
+    elseif isfile(p2)
+      d = load(p2)
+      return columnar_imbalance_ed(d["sz_expectations"], L)
+    else
+      return nothing
+    end
+  end
+
+  ed_imb = _load_ed(L, h, grid)
+  if ed_imb === nothing
+    @warn "No ED data found for L=$(L), h=$(h), grid=$(grid). Skipping ED overlay."
+  end
+
+  # Time grid for ED assumes 0.1 step
+  ed_times = ed_imb === nothing ? Float64[] : collect(0.1:0.1:0.1*length(ed_imb))
+
+  # Compute aligned absolute differences |ED − TN|
+  T = Float64[]
+  D = Float64[]
+  if ed_imb !== nothing
+    ed_map = Dict(round(tt, digits=8) => i for (i, tt) in pairs(ed_times))
+    for (i, tt) in pairs(times)
+      key = round(tt, digits=8)
+      if haskey(ed_map, key)
+        j = ed_map[key]
+        push!(T, tt)
+        push!(D, abs(ed_imb[j] - sim_imb[i]))
+      end
+    end
+  end
+
+  # Plot
+  fig = Figure(size=(10cm, 6cm))
+  ax = Axis(fig[1, 1], xlabel="t", ylabel="|ED − TN| imbalance", title="L=$(L), h=$(h), grid=$(grid)")
+  if !isempty(T)
+    lines!(ax, T, D; color=:steelblue, label="ED − TN")
+    hlines!(ax, [0.0]; color=:gray, linestyle=:dot)
+  else
+    @warn "No common time grid with ED found; cannot plot ED − TN differences."
+  end
+  try
+    axislegend(ax; position=:rb)
+  catch
+  end
+
+  # Save
+  base = isnothing(outfile) ? joinpath("plots", "single_with_ed", splitdir(sim_dir)[2]) : outfile
+  mkpath(dirname(base))
+  save(base * ".pdf", fig)
+  save(base * ".png", fig)
+  println("Saved plot to $(base).pdf and $(base).png")
+  return fig
+end
+
+"""
+  plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outfile=nothing)
+
+Overlay the ED − TN columnar imbalance differences for multiple simulations with
+the same (L, h, gridnum). `sim_dirs` should be directories containing JLD2 outputs
+saved by run_simulation/save_simulation_data.
+
+Saves PDF and PNG to `plots/single_with_ed/comparison_<L>_<h>_g<grid>` unless
+`outfile` is provided. Returns the Makie Figure.
+"""
+function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outfile=nothing)
+  @assert !isempty(sim_dirs) "No simulation directories provided"
+
+  # Helper to choose the best file inside a directory
+  function _pick_file(dir)
+    files = filter(f -> endswith(f, ".jld2"), readdir(dir))
+    @assert !isempty(files) "No .jld2 files found in $(dir)"
+    finished = filter(f -> occursin("finished_results", f), files)
+    file = isempty(finished) ? files[1] : finished[1]
+    return joinpath(dir, file)
+  end
+
+  # Load first config to determine (L,h,grid)
+  first_file = _pick_file(sim_dirs[1])
+  @show first_file
+  cfg0 = jldopen(first_file, "r") do io
+    io["config"]
+  end
+  L = cfg0.graph.L
+  h = cfg0.model.h
+  grid = cfg0.graph.gridnum
+
+  # Load ED
+  function _load_ed(L, h, grid)
+    p1 = joinpath(@__DIR__, "../../heisenberg_ed/data/fun_results_columnar_Lx=$(L)_Ly=$(L)_hmax=$(h)_gridnum=$(grid).jld2")
+    p2 = joinpath(@__DIR__, "../../heisenberg_ed/data/results_columnar_Lx=$(L)_Ly=$(L)_hmax=$(h)_gridnum=$(grid).jld2")
+    if isfile(p1)
+      d = load(p1)
+      return columnar_imbalance_ed(d["sz_expectations"], L)
+    elseif isfile(p2)
+      d = load(p2)
+      return columnar_imbalance_ed(d["sz_expectations"], L)
+    else
+      return nothing
+    end
+  end
+  ed_imb = _load_ed(L, h, grid)
+  ed_times = ed_imb === nothing ? Float64[] : collect(0.1:0.1:0.1*length(ed_imb))
+
+  # Prepare plot with subplots for max bond dimension and step time
+  fig = Figure(size=(12cm, 13cm))
+  ax = Axis(fig[1, 1], xlabel="t", ylabel="|ED − TN| imbalance", title="L=$(L), h=$(h), grid=$(grid)", yscale=log10)
+  ax_md = Axis(fig[2, 1], xlabel="t", ylabel="maxlinkdim")
+  ax_rt = Axis(fig[3, 1], xlabel="t", ylabel="step time [s]")
+
+  # Colors/labels
+  default_labels = [basename(dir) for dir in sim_dirs]
+  labels = isnothing(labels) ? default_labels : labels
+
+  # Use magma colormap for consistency with other plots
+  ncurves = length(sim_dirs)
+  colors = [get(ColorSchemes.magma, (i - 0.5) / max(ncurves, 1)) for i in 1:ncurves]
+
+  for (i, dir) in enumerate(sim_dirs)
+    file = _pick_file(dir)
+    cfg = jldopen(file, "r") do io
+      io["config"]
+    end
+    # sanity check
+    @assert cfg.graph.L == L && cfg.model.h == h && cfg.graph.gridnum == grid "All simulations must share (L, h, gridnum)"
+    times = cfg.observer.times
+    sim_imb = TTNEvo.columnar_imbalance_total(cfg.observer.sz)
+    # Compute aligned difference ED − TN
+    if ed_imb === nothing
+      @warn "No ED data found; skipping $(labels[i])"
+      continue
+    end
+    ed_map = Dict(round(tt, digits=8) => j for (j, tt) in pairs(ed_times))
+    T = Float64[]
+    D = Float64[]
+    for (k, tt) in pairs(times)
+      key = round(tt, digits=8)
+      if haskey(ed_map, key)
+        j = ed_map[key]
+        push!(T, tt)
+        push!(D, abs.(ed_imb[j] - sim_imb[k]))
+      end
+    end
+    if !isempty(T)
+      lines!(ax, T, D; color=colors[(i-1)%length(colors)+1], label=labels[i])
+    else
+      @warn "No common time grid with ED for $(labels[i]); skipping curve."
+    end
+
+    # Plot max bond dimension over time if available
+    if !isempty(cfg.observer.maxdim)
+      t_md = Float64[]
+      d_md = Float64[]
+      for pair in cfg.observer.maxdim
+        push!(t_md, first(pair))
+        ld = last(pair)
+        # Try to compute max over edges; fallback to values
+        maxd = try
+          maximum(ld[e] for e in edges(ld))
+        catch
+          try
+            maximum(values(ld))
+          catch
+            NaN
+          end
+        end
+        push!(d_md, maxd)
+      end
+      p = sortperm(t_md)
+      lines!(ax_md, t_md[p], d_md[p]; color=colors[(i-1)%length(colors)+1])
+    end
+
+    # Plot execution time per step
+    if !isempty(cfg.observer.ex_times) && !isempty(times)
+      n = min(length(times), length(cfg.observer.ex_times))
+      lines!(ax_rt, times[1:n], cfg.observer.ex_times[1:n]; color=colors[(i-1)%length(colors)+1])
+    end
+  end
+  # Reference line at zero
+  hlines!(ax, [0.0]; color=:gray, linestyle=:dot)
+
+  try
+    axislegend(ax; position=:rb)
+  catch
+  end
+
+  base = isnothing(outfile) ? joinpath("plots", "single_with_ed", @sprintf("comparison_L%d_h%.1f_g%d", L, h, grid)) : outfile
+  mkpath(dirname(base))
+  save(base * ".pdf", fig)
+  save(base * ".png", fig)
+  println("Saved comparison plot to $(base).pdf and $(base).png")
+  return fig
+end
+
+
+"""
   aggregate_series_mean_std(times_vec, series_vec)
 
 Align multiple time/value series by the minimum common length and return
@@ -115,6 +382,45 @@ function aggregate_series_mean_std(times_vec, series_vec)
   mean_vec = vec(mean(mat, dims=2))
   stderr_vec = vec(std(mat, dims=2)) ./ sqrt(size(mat, 2))
   return times, mean_vec, stderr_vec
+end
+
+"""
+  fit_power_law_beta(times, values; tmin=5.0, tmax=50.0)
+
+Estimate the decay exponent β from an averaged imbalance curve by fitting
+  values ≈ A * t^(-β) on a log–log window t ∈ [tmin, tmax].
+Returns a NamedTuple `(beta, stderr, npts, r2)` or `nothing` if not enough points.
+"""
+function fit_power_law_beta(times::AbstractVector, values::AbstractVector; tmin::Real=5.0, tmax::Real=50.0)
+  isempty(times) && return nothing
+  isempty(values) && return nothing
+  # Select window and ensure positivity
+  idx = findall(i -> times[i] >= tmin && times[i] <= tmax && isfinite(values[i]) && values[i] > 0 && isfinite(times[i]), eachindex(times))
+  length(idx) < 3 && return nothing
+  t = Float64[times[i] for i in idx]
+  y = Float64[values[i] for i in idx]
+  # Log–log linear regression: log y = a + b * log t, with β = -b and A = exp(a)
+  X = log.(t)
+  Y = log.(y)
+  n = length(X)
+  Sx = sum(X)
+  Sy = sum(Y)
+  Sxx = sum(abs2, X)
+  Sxy = sum(X .* Y)
+  den = n * Sxx - Sx^2
+  den == 0 && return nothing
+  b = (n * Sxy - Sx * Sy) / den
+  a = (Sy - b * Sx) / n
+  # Residuals and errors
+  Ŷ = a .+ b .* X
+  resid = Y .- Ŷ
+  s2 = sum(abs2, resid) / max(n - 2, 1)
+  stderr_b = sqrt(s2 * n / den)
+  # R^2
+  SS_tot = sum(abs2, Y .- mean(Y))
+  SS_res = sum(abs2, resid)
+  r2 = SS_tot ≈ 0 ? 1.0 : 1.0 - SS_res / SS_tot
+  return (beta=-b, stderr=stderr_b, npts=n, r2=r2, A=exp(a))
 end
 
 """
@@ -152,6 +458,239 @@ function compute_mean_imbalance_stats(df::DataFrame)
 end
 
 """
+  compute_beta_over_gridmean(df; L, h, tmin=5.0, tmax=50.0)
+
+For fixed (L, h), take the highest available χ per `graph_type`, compute the
+mean imbalance across gridnums, and fit β from t^{−β} on [tmin, tmax].
+Returns a Dict keyed by `graph_type::String` with values `(beta, stderr, npts, r2, Dmax)`.
+"""
+function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tmax::Real=50.0)
+  df_lh = filter(row -> row.graph_L == L && row.model_h == h, df)
+  isempty(df_lh) && return Dict{String,NamedTuple}()
+  # Only keep non-empty times
+  df_lh = filter(row -> !isempty(row.times), df_lh)
+  stats = compute_mean_imbalance_stats(df_lh)
+  out = Dict{String,NamedTuple}()
+  for type in sort(unique(first.(keys(stats))))
+    Ds_type = sort([D for (t, D) in keys(stats) if t == type])
+    isempty(Ds_type) && continue
+    Dmax = Ds_type[end]
+    st = stats[(type, Dmax)]
+    fit = fit_power_law_beta(st.times, st.mean; tmin=tmin, tmax=tmax)
+    fit === nothing && continue
+    out[type] = merge(fit, (Dmax=Dmax,))
+  end
+  return out
+end
+
+"""
+  plot_beta_vs_disorder(df; L_values, h_values, dir, tmin=5.0, tmax=50.0)
+
+For each method (`graph_type`), plot β versus disorder strength for multiple system sizes.
+Uses the highest available χ per method and the grid-averaged imbalance.
+"""
+function plot_beta_vs_disorder(
+  df::DataFrame;
+  L_values=[4, 6, 8, 10],
+  h_values=[0.0, 5.0, 10.0, 20.0, 30.0, 50.0],
+  dir::String,
+  tmin::Real=5.0,
+  tmax::Real=50.0,
+  xlim::Tuple{<:Real,<:Real}=(NaN, NaN),
+  ylim::Tuple{<:Real,<:Real}=(0.0, 1.0),
+)
+  # Collect all methods from the filtered data
+  df_sub = filter(row -> row.graph_L in L_values && row.model_h in h_values, df)
+  methods = sort(unique(df_sub.graph_type))
+  isempty(methods) && return
+
+  # Color map across L values for visual consistency
+  Ls_sorted = sort(unique(L_values))
+  colors = wong_colors()
+  color_map = Dict{Int,Any}()
+  for (i, L) in enumerate(Ls_sorted)
+    color_map[L] = colors[(i-1)%length(colors)+1]
+  end
+
+  for method in methods
+    fig = Figure(fontsize=11pt, size=(10cm, 6cm))
+    ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta", title="$(labels[method])")
+    # Apply fixed limits if provided
+    xlo, xhi = xlim
+    if isnan(xlo) || isnan(xhi)
+      xlo, xhi = minimum(h_values), maximum(h_values)
+    end
+    xlims!(ax, xlo, xhi)
+    ylims!(ax, first(ylim), last(ylim))
+
+    for L in Ls_sorted
+      betas = Float64[]
+      errs = Float64[]
+      hs = Float64[]
+      for h in sort(h_values)
+        vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax)
+        haskey(vals, method) || continue
+        push!(hs, float(h))
+        push!(betas, vals[method].beta)
+        push!(errs, vals[method].stderr)
+      end
+      isempty(hs) && continue
+      c = color_map[L]
+      label = "L=$L"
+      lines!(ax, hs, betas; color=c, label=label)
+      scatter!(ax, hs, betas; color=c, label=label)
+      # Optional uncertainty in β as vertical range bars (robust Makie recipe)
+      if !isempty(errs)
+        lows = betas .- errs
+        highs = betas .+ errs
+        rangebars!(ax, hs, lows, highs; color=c)
+      end
+    end
+
+    try
+      axislegend(ax, position=:rt)
+    catch
+    end
+    plots_dir = joinpath("plots", dir)
+    mkpath(plots_dir)
+    fname = joinpath(plots_dir, "beta_vs_h_$(method)_tmin$(tmin)_tmax$(tmax).pdf")
+    save(fname, fig)
+    # also PNG
+    save(replace(fname, ".pdf" => ".png"), fig)
+    println("Saved β vs h plot for method=$(method) to $(fname)")
+  end
+end
+
+"""
+  plot_fit_vs_mean(df; L_values, h_values, dir, tmin=5.0, tmax=50.0, xlog=true, ylog=false)
+
+For each pair (L, h), plot the averaged imbalance (mean over gridnums at highest χ per
+method) and overlay the best-fit power-law A * t^{−β} within the fit window [tmin, tmax].
+Saves one figure per (L, h). X and Y log scaling are controlled independently via `xlog`/`ylog`.
+"""
+function plot_fit_vs_mean(
+  df::DataFrame;
+  L_values=[4, 6, 8, 10],
+  h_values=[0.0, 5.0, 10.0, 20.0, 30.0, 50.0],
+  dir::String,
+  tmin::Real=50.0,
+  tmax::Real=100.0,
+  xlog::Bool=false,
+  ylog::Bool=false,
+  xlim::Tuple{<:Real,<:Real}=(1e-1, 100.0),
+  ylim::Tuple{<:Real,<:Real}=(1e-4, 1.0),
+)
+  for L in sort(unique(L_values))
+    for h in sort(h_values)
+      df_lh = filter(row -> row.graph_L == L && row.model_h == h && !isempty(row.times), df)
+      isempty(df_lh) && continue
+
+      stats = compute_mean_imbalance_stats(df_lh)
+      isempty(stats) && continue
+
+      # Determine methods present and pick highest χ for each
+      methods = sort(unique(first.(keys(stats))))
+      isempty(methods) && continue
+
+      # Colors per method using magma mid-range for readability
+      n_types = length(methods)
+      low, high = 0.2, 0.8
+      fracs = if n_types == 1
+        [0.55]
+      elseif n_types == 2
+        [0.35, 0.65]
+      else
+        [low + (high - low) * (j - 1) / (n_types - 1) for j in 1:n_types]
+      end
+
+      fig = Figure(fontsize=11pt, size=(12cm, 7cm))
+      ax = Axis(fig[1, 1], xlabel=L"t", ylabel="Averaged imbalance")
+      # Apply fixed limits and scales; ensure positive if a log scale is used
+      xlo, xhi = xlim
+      ylo, yhi = ylim
+      if xlog
+        xlo = max(eps(), xlo)
+        xhi = max(xhi, xlo * 10)
+        xlims!(ax, xlo, xhi)
+        ax.xscale = log10
+      end
+      if ylog
+        ylo = max(eps(), ylo)
+        yhi = max(yhi, ylo * 10)
+        ylims!(ax, ylo, yhi)
+        ax.yscale = log10
+      end
+      xlims!(ax, xlo, xhi)
+      ylims!(ax, ylo, yhi)
+
+      # Mark fit window
+      vlines!(ax, [tmin, tmax]; color=:gray, linestyle=:dot)
+
+      plotted = false
+      for (i, method) in enumerate(methods)
+        Ds_type = sort([D for (t, D) in keys(stats) if t == method])
+        isempty(Ds_type) && continue
+        Dmax = Ds_type[end]
+        st = stats[(method, Dmax)]
+
+        # Fit β and A on the specified window
+        fit = fit_power_law_beta(st.times, st.mean; tmin=tmin, tmax=tmax)
+        fit === nothing && continue
+
+        # Evaluate fitted curve within [tmin, tmax]
+        idxf = findall(t -> t >= tmin && t <= tmax, st.times)
+        isempty(idxf) && continue
+        tf = st.times[idxf]
+        yfit = fit.A .* (tf .^ (-fit.beta))
+
+        color = get(ColorSchemes.magma, fracs[i])
+        label_mean = "$(labels[method]), D=$(Dmax) mean"
+        label_fit = @sprintf("%s fit (β=%.3f)", labels[method], fit.beta)
+
+        # Mean ± stderr with filtering/clamping only if the corresponding axis is log
+        # Build mask for valid points
+        mask = trues(length(st.times))
+        if xlog
+          mask .&= st.times .> 0
+        end
+        if ylog
+          mask .&= st.mean .> 0
+        end
+        if any(mask)
+          tp = st.times[mask]
+          mp = st.mean[mask]
+          sp = st.stderr[mask]
+          lines!(ax, tp, mp; color=color, linewidth=2, label=label_mean)
+          if ylog
+            lower = max.(mp .- sp, 1e-12)
+            upper = max.(mp .+ sp, 1e-12)
+            band!(ax, tp, lower, upper; color=(color, 0.25))
+          else
+            band!(ax, tp, mp .- sp, mp .+ sp; color=(color, 0.25))
+          end
+        end
+        # Fitted within the window
+        lines!(ax, tf, yfit; color=color, linestyle=:dash, linewidth=2, label=label_fit)
+
+        plotted = true
+      end
+
+      !plotted && continue
+      try
+        axislegend(ax, position=:rb)
+      catch
+      end
+      plots_dir = joinpath("plots", dir)
+      mkpath(plots_dir)
+      fname = joinpath(plots_dir, @sprintf("fit_vs_mean_L%d_h%.1f_tmin%.1f_tmax%.1f.pdf", L, h, tmin, tmax))
+      save(fname, fig)
+      save(replace(fname, ".pdf" => ".png"), fig)
+      println("Saved fit-vs-mean plot to $(fname)")
+    end
+  end
+end
+
+"""
   compute_ed_error_and_rows(df_current, L, h)
 
 Compute mean absolute error of `df_current` trajectories against ED.
@@ -159,21 +698,21 @@ Returns (error::Union{Nothing,Float64}, df_current_common::DataFrame).
 """
 function compute_ed_error_and_rows(df_current::DataFrame, L::Int, h)
   if isempty(df_current)
-    return nothing, df_current
+    return nothing, nothing, df_current
   end
   common_gridnums = Set(df_current.graph_gridnum)
   if isempty(common_gridnums)
-    return nothing, df_current
+    return nothing, nothing, df_current
   end
   df_current_common = filter(r -> r.graph_gridnum in common_gridnums, df_current)
   sort!(df_current_common, :graph_gridnum)
   current_imbalances = [r.imbalance for r in eachrow(df_current_common)]
   if isempty(current_imbalances)
-    return nothing, df_current_common
+    return nothing, nothing, df_current_common
   end
   min_len = minimum(length, current_imbalances)
   if min_len < 2
-    return nothing, df_current_common
+    return nothing, nothing, df_current_common
   end
   errors = []
   for gridnum in common_gridnums
@@ -198,13 +737,13 @@ Returns (error::Union{Nothing,Float64}, df_current_common::DataFrame).
 """
 function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::DataFrame)
   if isempty(df_current) || isempty(df_benchmark)
-    return nothing, df_current
+    return nothing, nothing, df_current
   end
   benchmark_gridnums = Set(df_benchmark.graph_gridnum)
   current_gridnums = Set(df_current.graph_gridnum)
   common_gridnums = intersect(benchmark_gridnums, current_gridnums)
   if isempty(common_gridnums)
-    return nothing, df_current
+    return nothing, nothing, df_current
   end
   df_benchmark_common = filter(r -> r.graph_gridnum in common_gridnums, df_benchmark)
   df_current_common = filter(r -> r.graph_gridnum in common_gridnums, df_current)
@@ -213,13 +752,13 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   benchmark_imbalances = [r.imbalance for r in eachrow(df_benchmark_common)]
   current_imbalances = [r.imbalance for r in eachrow(df_current_common)]
   if isempty(benchmark_imbalances) || isempty(current_imbalances)
-    return nothing, df_current_common
+    return nothing, nothing, df_current_common
   end
   min_len_benchmark = minimum(length, benchmark_imbalances)
   min_len_current = minimum(length, current_imbalances)
   min_len = min(min_len_benchmark, min_len_current)
   if min_len == 0
-    return nothing, df_current_common
+    return nothing, nothing, df_current_common
   end
   benchmark_matrix = hcat([imb[1:min_len] for imb in benchmark_imbalances]...)
   current_matrix = hcat([imb[1:min_len] for imb in current_imbalances]...)
@@ -606,7 +1145,20 @@ function save_tree_structure_for_plotting(df_row, dir)
   end
 end
 
-function load_L_new(L; old_snake=true)
+function load_new(L)
+
+  tree = "data/L$L-column-tree-new-pre-det"
+  if L == 8
+    snake = "data/L$L-column-snake"
+  else
+    snake = "data/proc/L$L-column-snake"
+  end
+  snake_new = "data/L$L-column-snake-new"
+
+  return load_general_dirs([tree, snake, snake_new])
+end
+
+function load_L_new(L; old_snake=false)
   tree_pre = "data/L$L-column-tree-new-pre-det"
   tree = "data/L$L-column-tree-new"
   local snake
@@ -620,9 +1172,13 @@ function load_L_new(L; old_snake=true)
     tree_pre = "data/L$L-column-tree-pre-det"
   end
   if L == 8
-    snake = "data/L$L-column-snake"
+    snake = "data/L$L-column-snake-new"
     tree_pre = "data/L$L-column-tree-new-pre-det"
   end
+  if L == 6
+    snake = "data/L$L-column-snake-new"
+  end
+
   return load_general_dirs([tree_pre, snake])
 end
 
@@ -831,7 +1387,7 @@ function plot_accuracy_convergence(df::DataFrame; L::Int, dir)
 
       if !isempty(dims)
         line_color = colors[type_idx%length(colors)+1]
-        scatter!(ax, dims, errors, label=type, color=line_color)
+        scatter!(ax, dims, errors, label=labels[type], color=line_color)
         lines!(ax, dims, errors, color=line_color)
       end
     end
@@ -910,7 +1466,7 @@ function plot_accuracy_vs_parameters(df::DataFrame; L::Int, dir)
 
       maxdims = sort(unique(df_type.initial_state_initial_maxdim))
       if L in (6, 8)
-        maxdims = [64, 128, 196]
+        maxdims = [32, 64, 128, 196]
       end
 
       if length(maxdims) < 2 && !use_ed_benchmark
@@ -919,6 +1475,9 @@ function plot_accuracy_vs_parameters(df::DataFrame; L::Int, dir)
 
       benchmark_maxdim = maximum(maxdims)
       df_benchmark = filter(row -> row.initial_state_initial_maxdim == benchmark_maxdim, df_type)
+      if isempty(df_benchmark)
+        continue
+      end
 
       errors = Float64[]
       stds = Float64[]
@@ -951,7 +1510,7 @@ function plot_accuracy_vs_parameters(df::DataFrame; L::Int, dir)
 
         # plot line + points + errorbars
         lines!(ax, params, errors; color=line_color, linewidth=1.5)
-        scatter!(ax, params, errors; label=type,
+        scatter!(ax, params, errors; label=labels[type],
           color=line_color, marker=marker, markersize=6)
         errorbars!(ax, params, errors, stds; direction=:y, color=line_color)
       end
@@ -1133,10 +1692,11 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
       scatter!(ax, s.params, s.errors;
         color=s.runtimes,
         colormap=:magma,
+        colorscale=log10,
         colorrange=(global_rt_min + 1e-16, global_rt_max + 1e-16),
         marker=marker,
         markersize=4.5,
-        label=s.type,
+        label=labels[s.type],
       )
     end
 
@@ -1145,7 +1705,19 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
     end
   end
 
-  Colorbar(fig[1, 3], colormap=:viridis, limits=(global_rt_min + 1e-16, global_rt_max + 1e-16), label="Execution Time (s)")
+  # Set decade ticks to avoid fractional exponents on the colorbar
+  cb_exp_min = floor(Int, log10(global_rt_min + 1e-16))
+  cb_exp_max = ceil(Int, log10(global_rt_max + 1e-16))
+  cb_positions = 10.0 .^ collect(cb_exp_min:cb_exp_max)
+  cb_labels = ["10^$(e)" for e in cb_exp_min:cb_exp_max]
+
+  Colorbar(fig[1, 3],
+    colormap=:viridis,
+    limits=(global_rt_min + 1e-16, global_rt_max + 1e-16),
+    label="Execution Time (s)",
+    scale=log10,
+    ticks=(cb_positions, cb_labels),
+  )
 
   colgap!(fig.layout, 4.0)
   rowgap!(fig.layout, 4.0)
@@ -1281,11 +1853,12 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
         color=s.runtimes,
         colormap=:magma,
         colorrange=(global_rt_min + 1e-16, global_rt_max + 1e-16),
+        colorscale=log10,
         marker=marker,
         markersize=8,
         strokecolor=:black,
         strokewidth=0.8,
-        label=s.type,
+        label=labels[s.type],
       )
     end
     if h_idx == 1
@@ -1293,7 +1866,19 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
     end
   end
 
-  Colorbar(fig[1, 3], colormap=:magma, limits=(global_rt_min + 1e-16, global_rt_max + 1e-16), label="Execution Time (s)")
+  # Set decade ticks to avoid fractional exponents on the colorbar
+  cb2_exp_min = floor(Int, log10(global_rt_min + 1e-16))
+  cb2_exp_max = ceil(Int, log10(global_rt_max + 1e-16))
+  cb2_positions = 10.0 .^ collect(cb2_exp_min:cb2_exp_max)
+  cb2_labels = [L"10^%$(e)" for e in cb2_exp_min:cb2_exp_max]
+
+  Colorbar(fig[1, 3],
+    colormap=:magma,
+    scale=log10,
+    limits=(10.0^cb2_exp_min, 10.0^cb2_exp_max),
+    label="Execution Time (s)",
+    ticks=(cb2_positions, cb2_labels),
+  )
 
   colgap!(fig.layout, 4.0)
   rowgap!(fig.layout, 4.0)
@@ -1393,7 +1978,7 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
         marker = marker_shapes[(type_idx-1)%length(marker_shapes)+1]
 
         lines!(ax, params, runtimes; color=line_color, linewidth=1.5)
-        scatter!(ax, params, runtimes; label=type,
+        scatter!(ax, params, runtimes; label=labels[type],
           color=line_color, marker=marker, markersize=6)
       end
     end
@@ -1420,7 +2005,6 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
 
   return fig
 end
-
 
 
 function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
@@ -1512,7 +2096,7 @@ function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
         line_color = colors[(type_idx-1)%length(colors)+1]
         marker = marker_shapes[(type_idx-1)%length(marker_shapes)+1]
         lines!(ax, runtimes, errors; color=line_color, linewidth=1.5)
-        scatter!(ax, runtimes, errors; label=type,
+        scatter!(ax, runtimes, errors; label=labels[type],
           color=line_color, marker=marker, markersize=6)
         errorbars!(ax, runtimes, errors, stds; direction=:y, color=line_color)
       end
@@ -1603,18 +2187,18 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
           end
 
           # Mark earliest divergence time between largest and next-largest χ
-          begin
-            threshold = 0.01 / 2.0
-            divpt = earliest_divergence(df_graph; threshold)
-            if divpt !== nothing
-              tdiv, ydiv = divpt
-              # draw vertical marker and a star at the max-D curve
-              vlines!(ax, [tdiv]; color=:black, linestyle=:dash, linewidth=1.5)
-              scatter!(ax, [tdiv], [ydiv]; color=:black, marker=:star5, markersize=9)
-              # Optional small annotation
-              text!(ax, tdiv, ydiv; text=L"\Delta>%$(threshold)", align=(:left, :top), color=:black, fontsize=7)
-            end
-          end
+          # begin
+          #   threshold = 0.01 / 2.0
+          #   divpt = earliest_divergence(df_graph; threshold)
+          #   if divpt !== nothing
+          #     tdiv, ydiv = divpt
+          #     # draw vertical marker and a star at the max-D curve
+          #     vlines!(ax, [tdiv]; color=:black, linestyle=:dash, linewidth=1.5)
+          #     scatter!(ax, [tdiv], [ydiv]; color=:black, marker=:star5, markersize=9)
+          #     # Optional small annotation
+          #     text!(ax, tdiv, ydiv; text=L"\Delta>%$(threshold)", align=(:left, :top), color=:black, fontsize=7)
+          #   end
+          # end
           try
             Legend(fig[1:2, 2], axes[1])
           catch
@@ -1703,7 +2287,7 @@ function plot_individual_imbalance_error(df, L_values=[4, 6, 8]; dir)
               lines!(ax, common_times, error .+ 1e-16,
                 label=L"\chi=%$(d.initial_state_initial_maxdim)",
                 color=color)
-              window = 50
+              window = 100
               if length(error) > window
                 ma_error = moving_average(error, window)
                 ma_times = common_times[window÷2:length(ma_error)+window÷2-1]
@@ -1971,7 +2555,7 @@ function plot_error_vs_system_size(df::DataFrame; dir)
             line_color = get(ColorSchemes.bamako, D_to_val[maxdim])
           end
           marker = markers[mod1(type_idx, length(markers))]
-          label = "$type, D=$maxdim"
+          label = "$(labels[type]), D=$maxdim"
           lines!(ax, Ls_for_plot, errors, label=label, color=line_color)
           scatter!(ax, Ls_for_plot, errors, color=line_color, label=label, marker=marker, markersize=15)
         end
@@ -2064,7 +2648,7 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
 
     color = get(ColorSchemes.magma, fracs[i])
     style = linestyles[(i-1)%length(linestyles)+1]
-    label = "$type, D=$Dmax"
+    label = "$(labels[type]), D=$Dmax"
     lines!(ax, times, mean_vals; color=color, linestyle=style, label=label, linewidth=2)
     band!(ax, times, mean_vals .- stderr_vals, mean_vals .+ stderr_vals; color=(color, 0.25))
     plotted_any = true
@@ -2100,9 +2684,11 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
 
 end
 
-function main(df; dir, L_values=[4, 6, 8, 10])
-  plot_individual_imbalance(df, L_values; dir)
-  plot_individual_imbalance_error(df, L_values; dir)
+function main(df; dir, L_values=[4, 6, 8, 10], individual=false)
+  if individual
+    plot_individual_imbalance(df, L_values; dir)
+    plot_individual_imbalance_error(df, L_values; dir)
+  end
   for L in L_values
     println("Generating plots for L=$L")
     for h in [0.0, 5.0, 10.0, 20.0, 30.0, 50.0]
@@ -2116,4 +2702,20 @@ function main(df; dir, L_values=[4, 6, 8, 10])
   end
   plot_error_vs_disorder(df; dir)
   plot_error_vs_system_size(df; dir)
+  # New: β vs h plots using grid-averaged imbalance at highest χ per method
+  plot_beta_vs_disorder(df;
+    L_values=L_values,
+    h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
+    dir=dir,
+    tmin=50.0,
+    tmax=100.0,
+    xlim=(0.0, 50.0),
+    ylim=(0.0, 1.0),
+  )
+  # New: Overlay fitted power-law with averaged imbalance per (L, h)
+  plot_fit_vs_mean(df;
+    L_values=L_values,
+    h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
+    dir=dir,
+  )
 end

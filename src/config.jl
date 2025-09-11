@@ -2,21 +2,19 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [6, 8]
-h = [0.0, 5.0, 10.0, 20.0, 50.0]
+L = [6]
+h = [0.0]
 
 time_step = [0.1]
 total_time = [100.0]
 time_evo_method = [:onesite]
 
-maxdim = [64, 128, 196]
-maxdim = [32]
-# maxdim = [32]
+maxdim = [32, 64, 128, 196]
 # maxdim = [64]
 cutoff = [1e-12]
 nsite = [1]
 qns = [false]
-grid_number = collect(1:10)
+grid_number = collect(1:1)
 
 init_state = [:columnar_neel]
 initial_maxdim = [2]
