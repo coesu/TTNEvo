@@ -99,7 +99,7 @@ function build_initial_state(config::InitialStateConfig, graph, graph_type, site
   )
 end
 
-function build_initial_state(config::InitialStateConfig, graph, graph_type::FreeGraph, sites)
+function build_initial_state(config::InitialStateConfig, graph, graph_type::Union{FreeGraph,HierarchicalTree}, sites)
   initial_maxdim, qns_val = _get_initial_state_params(config)
 
   contract_sq = get_contraction_sequence(siteinds(v -> v[1] == 1 ? "S=1/2" : "a", graph; conserve_qns=false), initial_maxdim)
@@ -128,7 +128,7 @@ function init_simulation(config::AbstractSimulationConfig)
   @visualize graph
 
   qns = config.time_evolution.qns
-  sites = if isa(config.graph, FreeGraph)
+  sites = if isa(config.graph, FreeGraph) || isa(config.graph, HierarchicalTree)
     siteinds(v -> v[1] == 1 ? "S=1/2" : "a", graph; conserve_qns=qns)
   else
     siteinds("S=1/2", graph; conserve_qns=qns)
@@ -137,7 +137,7 @@ function init_simulation(config::AbstractSimulationConfig)
   ham_graph = graph
   if config.graph.full_interaction
     dims = (config.graph.L, config.graph.L)
-    ham_graph = if isa(config.graph, FreeGraph)
+    ham_graph = if isa(config.graph, FreeGraph) || isa(config.graph, HierarchicalTree)
       NamedGraph(grid(dims), [(1, v...) for v in Tuple.(CartesianIndices(dims))])
     else
       g = NamedGraph(grid(dims), Tuple.(CartesianIndices(dims)))
@@ -146,7 +146,6 @@ function init_simulation(config::AbstractSimulationConfig)
     end
   end
   hamilt = build_hamiltonian(config.model, ham_graph, field)
-
   H = ttn(hamilt, sites)
 
   ψ = build_initial_state(config.initial_state, graph, config.graph, sites)
@@ -282,7 +281,7 @@ function time_evolve(method::Symbol, H, dt, ψ; cutoff, maxdim)
 end
 
 # Dispatched function for structure and bond dimension optimization
-function optimize_structure_and_bond!(ψ, H, hamilt, graph::AbstractQuantumGraph, config)
+function optimize_structure_and_bond!(ψ, H, hamilt, graph::AbstractQuantumGraph, config; kwargs...)
   return ψ, H, 0.0, 0.0 # No change, no error for generic graphs
 end
 
@@ -401,17 +400,11 @@ function generate_tree_filename(config)
   return joinpath("data", "tree_structures", "$(base_string)_tree.jld2")
 end
 
-function graph_label(c::TreeGraph)
-  return "tree"
-end
-
-function graph_label(c::SnakeGraph)
-  return "snake"
-end
-
-function graph_label(c::FreeGraph)
-  return "free"
-end
+graph_label(c::TreeGraph) = "tree"
+graph_label(c::SnakeGraph) = "snake"
+graph_label(c::HilbertCurve) = "hilbert"
+graph_label(c::FreeGraph) = "free"
+graph_label(c::HierarchicalTree) = "hierch"
 
 function generate_filename(config; finished=true)
   L_val = get_L(config)

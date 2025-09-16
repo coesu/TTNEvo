@@ -154,7 +154,7 @@ function product_state_hamiltionian(graph, graph_grid, sites, state_string, a)
   return ttn(os, sites)
 end
 
-function product_state_hamiltionian(graph, graph_grid, graph_type::FreeGraph, sites, state_string, a)
+function product_state_hamiltionian(graph, graph_grid, graph_type::Union{FreeGraph,HierarchicalTree}, sites, state_string, a)
   os = OpSum()
 
   for e in edges(graph_grid)
@@ -224,7 +224,7 @@ function expanded_random_product_state(
 end
 
 function expanded_random_product_state(
-  L, graph, graph_grid, graph_type::FreeGraph, sites, contract_sq, state_string; maxdim, qns, nsweeps=3
+  L, graph, graph_grid, graph_type::Union{FreeGraph,HierarchicalTree}, sites, contract_sq, state_string; maxdim, qns, nsweeps=3
 )
   println("expanded_random_product_state")
   @show state_string

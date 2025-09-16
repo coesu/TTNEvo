@@ -70,7 +70,7 @@ width_cm, height_cm = 4cm, 12cm   # single-column figure size
 pixel = (width_cm, height_cm)
 individual_size = (8cm, 4cm)
 
-labels = Dict("FreeGraph" => "TTN", "SnakeGraph" => "MPS")
+global labels = Dict("FreeGraph" => "TTN", "SnakeGraph" => "MPS", "HierarchicalTree" => "Hierch", "HilbertCurve" => "Hilbert")
 
 set_theme!(merge(publication_theme(), theme_latexfonts()))
 
@@ -757,6 +757,7 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   min_len_benchmark = minimum(length, benchmark_imbalances)
   min_len_current = minimum(length, current_imbalances)
   min_len = min(min_len_benchmark, min_len_current)
+  @show min_len
   if min_len == 0
     return nothing, nothing, df_current_common
   end
@@ -765,6 +766,7 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   error = abs.(benchmark_matrix .- current_matrix)
   error = mean(error, dims=1)
   mean_error = exp.(mean(log.(error)))
+  @show mean_error
   std_error = min(std(error), mean_error * 0.9) / sqrt(length(error))
 
   return mean_error, std_error, df_current_common
@@ -1182,26 +1184,94 @@ function load_L_new(L; old_snake=false)
   return load_general_dirs([tree_pre, snake])
 end
 
-function load_L4_peps()
-  peps = "data/L4-column-peps"
-  return load_general_dirs([peps]; remove_dup=false, remove_small_time=false)
+using JSON
+
+"""
+    choose_dirs(;
+        pattern::Union{Regex,String,Nothing}=nothing,
+        save_as::Union{String,Nothing}=nothing,
+        load_from::Union{String,Nothing}=nothing,
+        interactive::Bool=false,
+        base::String="data"
+    )
+
+Helper to choose simulation directories inside `base` (default: "data").
+Includes both the subdirs of `base` and any inside `base/proc`.
+
+# Options
+- `pattern`       : Regex or string to filter directories.
+- `save_as`       : Save the chosen dirs under this name in `dir_selections.json`.
+- `load_from`     : Load a previously saved selection by name.
+- `interactive`   : If true, lets you pick dirs interactively.
+- `base`          : Path to the folder containing simulation dirs.
+
+# Returns
+A vector of full paths (relative to project dir).
+"""
+function choose_dirs(;
+  pattern::Union{Regex,String,Nothing}=nothing,
+  save_as::Union{String,Nothing}=nothing,
+  load_from::Union{String,Nothing}=nothing,
+  interactive::Bool=false,
+  base::String="data"
+)
+  # Path to config file (kept at project root)
+  configfile = "dir_selections.json"
+
+  # Load previous selections if file exists
+  saved = isfile(configfile) ? JSON.parsefile(configfile) : Dict{String,Any}()
+
+  dirs = String[]
+
+  if load_from !== nothing
+    # Load saved selection
+    if haskey(saved, load_from)
+      dirs = saved[load_from]
+    else
+      error("No saved selection named '$load_from' in $configfile")
+    end
+  else
+    # Direct subdirs of base
+    direct_subdirs = filter(isdir, joinpath.(base, readdir(base)))
+
+    # Subdirs inside base/proc (if it exists)
+    proc_path = joinpath(base, "proc")
+    proc_subdirs = isdir(proc_path) ? filter(isdir, joinpath.(proc_path, readdir(proc_path))) : String[]
+
+    # Combine
+    all_dirs = vcat(direct_subdirs, proc_subdirs)
+
+    if pattern !== nothing
+      pat = pattern isa Regex ? pattern : Regex(pattern)
+      dirs = filter(x -> occursin(pat, basename(x)), all_dirs)
+    elseif interactive
+      println("Available directories in $base (and $base/proc if present):")
+      for (i, d) in enumerate(all_dirs)
+        println("[$i] $(basename(dirname(d)))/$(basename(d))")
+      end
+      print("Select directories (comma-separated indices): ")
+      choice = readline()
+      indices = parse.(Int, split(choice, ","))
+      dirs = all_dirs[indices]
+    else
+      dirs = all_dirs
+    end
+
+    # Save selection if requested
+    if save_as !== nothing
+      saved[save_as] = dirs
+      open(configfile, "w") do io
+        JSON.print(io, saved)
+      end
+      println("Saved selection '$save_as' to $configfile")
+    end
+  end
+
+  return dirs
 end
 
-function load_L4_tree_demo()
-  tree = "data/L4-column-tree"
-  return load_general_dirs([tree])
-end
-
-function load_L4_special_comp()
-  snake = "data/L4-column-snake-new"
-  tree = "data/L4-column-tree-new-pre-det"
-  return load_general_dirs([snake, tree])
-end
-
-function load_L10()
-  snake_L10 = "data/L10.0-column-snake/"
-  tree_L10 = "data/L10-column-tree-pre-det/"
-  return load_general_dirs([snake_L10, tree_L10]; remove_small_time=false)
+function load_choose_dirs(; remove_small_time=false, kwargs...)
+  return load_general_dirs(choose_dirs(; kwargs...); remove_small_time)
 end
 
 function load_L(L)

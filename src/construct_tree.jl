@@ -51,9 +51,15 @@ Base.@kwdef struct FreeGraph <: AbstractQuantumGraph
   save_tree::Bool = false
 end
 
-Base.@kwdef struct HierarchicalTreeGraph <: AbstractQuantumGraph
-  L::Int
-  gridnum::Int
+Base.@kwdef struct HierarchicalTree <: AbstractQuantumGraph
+  L::Int  # Linear dimension of the 2D square grid
+  gridnum::Int  # Grid number for field generation
+  with_ancilla::Bool = false  # Whether to include ancilla sites
+  full_interaction::Bool = true
+  optimize_structure::Bool = true
+  optimize_bonddim::Bool = true
+  load_tree_path::Union{String,Nothing} = nothing
+  save_tree::Bool = false
 end
 
 function build_graph(graph::AbstractQuantumGraph)
@@ -61,7 +67,7 @@ function build_graph(graph::AbstractQuantumGraph)
   return _build_graph(graph)
 end
 
-function _build_graph(graph_type::Union{FreeGraph,HierarchicalTreeGraph})
+function _build_graph(graph_type::Union{FreeGraph,HierarchicalTree})
   L = graph_type.L
   gridnum = graph_type.gridnum
 

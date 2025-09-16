@@ -1,9 +1,10 @@
-
 export PepsConfig, PepsObserver, PepsGraph
 export TreeConfig
 export TreeGraph
 export FreeGraph
 export SnakeGraph
+export HilbertCurve
+export HierarchicalTree
 export InitialStateConfig
 export Observer
 

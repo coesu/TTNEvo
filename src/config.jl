@@ -2,8 +2,8 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [6]
-h = [0.0]
+L = [12]
+h = [20.0]
 
 time_step = [0.1]
 total_time = [100.0]
@@ -25,7 +25,9 @@ save_path_training = "data/train"
 
 tree_pre_det = false
 tree_opt = false
-snake = true
+snake = false
+hilbert = true
+hierachical = true
 
 parameter_sets = []
 for Li in L,
@@ -61,6 +63,16 @@ for Li in L,
       Observer()
     ))
   end
+  if hierachical
+    push!(parameter_sets, TreeConfig(
+      TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
+      InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
+      "L$Li-column-hierachical",
+      HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
+      HierarchicalTree(L=Li, gridnum=grid_numberi, with_ancilla=false, full_interaction=true, optimize_structure=false, optimize_bonddim=false, save_tree=false),
+      Observer()
+    ))
+  end
   if snake
     push!(parameter_sets, TreeConfig(
       TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
@@ -68,6 +80,16 @@ for Li in L,
       "L$Li-column-snake-new",
       HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
       SnakeGraph(Li, grid_numberi, false, true),
+      Observer()
+    ))
+  end
+  if hilbert
+    push!(parameter_sets, TreeConfig(
+      TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
+      InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
+      "L$Li-column-hilbert",
+      HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
+      HilbertCurve(Li, grid_numberi, false, true),
       Observer()
     ))
   end
