@@ -1,5 +1,5 @@
 using ITensors: inner
-using ITensorNetworks: AbstractTreeTensorNetwork, inner, contraction_sequence
+using ITensorNetworks: AbstractTreeTensorNetwork, inner, contraction_sequence, ITensorNetwork
 using OMEinsumContractionOrders: OMEinsumContractionOrders
 using Printf
 using JLD2
@@ -7,6 +7,7 @@ using Dates
 
 export run_simulation, resume_from_file
 export TimeEvolutionConfig
+export save_initial_state, generate_initial_state_filename, save_initial_state_from_config
 
 # Accessor functions for configuration
 get_L(config::TreeConfig) = config.graph.L
@@ -428,6 +429,90 @@ function generate_filename(config; finished=true)
   else
     return "$(base_string)_preliminary_results.jld2"
   end
+end
+
+"""
+  generate_initial_state_filename(config)
+
+Create a filename for storing only the initial state `psi`.
+The format mirrors `generate_filename` but uses the suffix `_initial_state.jld2`.
+"""
+function generate_initial_state_filename(config)
+  L_val = get_L(config)
+  h_val = get_h(config)
+  time_step_val = get_time_step(config)
+  maxdim_val = get_maxdim(config)
+  time_evo_method_val = get_time_evo_method(config)
+  init_state_val = get_initial_state_type(config)
+  gridnum = get_gridnum(config)
+
+  formatted_h = @sprintf("%.2f", h_val)
+  formatted_time_step = @sprintf("%.4f", time_step_val)
+
+  graph_l = graph_label(config.graph)
+
+  base_string = "$(graph_l)_L=$(L_val)_gridnum=$(gridnum)_h=$(formatted_h)_dt=$(formatted_time_step)_D=$(maxdim_val)_method=$(time_evo_method_val)_init=$(init_state_val)"
+  base_string = replace(base_string, "/" => "_", "\\" => "_", ":" => "_")
+
+  return "$(base_string)_initial_state.jld2"
+end
+
+"""
+  save_initial_state(dir::String, ψ)
+
+Save only the initial state `ψ` to `dir/initial_state.jld2` (or a custom
+filename via `dir` + `generate_initial_state_filename`). The JLD2 file
+contains only one dataset: `"psi"`.
+"""
+function save_initial_state(dir::String, ψ)
+  mkpath(dir)
+  filepath = joinpath(dir, "initial_state.jld2")
+  jldopen(filepath, "w") do file
+    file["tn"] = ψ
+  end
+  println("Initial state saved to $filepath")
+  return filepath
+end
+
+"""
+  save_initial_state(config::Union{TreeConfig,PepsConfig}, ψ)
+
+Save only the initial state `ψ` to `data/<config.save_dir>/<generated name>`,
+using `generate_initial_state_filename(config)` for consistent naming. The
+JLD2 file contains only one dataset: `"psi"`.
+"""
+function save_initial_state(config::Union{TreeConfig,PepsConfig}, ψ)
+  dir = joinpath("data", config.save_dir)
+  mkpath(dir)
+  filepath = joinpath(dir, generate_initial_state_filename(config))
+  jldopen(filepath, "w") do file
+    file["tn"] = ψ
+  end
+  println("Initial state saved to $filepath")
+  return filepath
+end
+
+"""
+  save_initial_state_from_config(config)
+
+Build the initial state implied by `config` and save only that state to disk.
+Returns the path to the written `.jld2` file. This does not run any time
+evolution or modify existing workflows.
+"""
+function save_initial_state_from_config(config::TreeConfig)
+  ψ, _, _, _ = init_simulation(config)
+  return save_initial_state(config, ψ)
+end
+
+function save_initial_state_from_config(config::PepsConfig)
+  # Mirror the initial state construction in `peps_simulation`
+  L = get_L(config)
+  dims = (L, L)
+  g = NamedGraph(grid(dims), Tuple.(CartesianIndices(dims)))
+  state_string = _get_state_string(g, get_initial_state_type(config))
+  sites = siteinds("S=1/2", g)
+  ψ = ITensorNetwork(state_string, sites)
+  return save_initial_state(config, ψ)
 end
 
 function config_to_dict(config::Union{TreeConfig,PepsConfig})

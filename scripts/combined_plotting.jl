@@ -72,6 +72,21 @@ individual_size = (8cm, 4cm)
 
 global labels = Dict("FreeGraph" => "TTN", "SnakeGraph" => "MPS", "HierarchicalTree" => "Hierch", "HilbertCurve" => "Hilbert")
 
+const dir_labels = Dict(
+  "bench_baseline" => "Baseline",
+  "bench_krylov" => "Krylov",
+  "bench_shrewd" => "Shrewd",
+  "bench_twosite" => "Two-Site",
+)
+
+dir_label(dir::AbstractString) = begin
+  base = basename(dir)
+  for (pattern, lbl) in dir_labels
+    occursin(pattern, base) && return lbl
+  end
+  return base
+end
+
 set_theme!(merge(publication_theme(), theme_latexfonts()))
 
 function moving_average(data::AbstractVector, window::Int)
@@ -129,6 +144,7 @@ end
 
 Load a single simulation from `sim_dir` (expects a JLD2 saved by run_simulation/save_simulation_data)
 and plot ED − TN of the columnar imbalance for the same L, h, gridnum.
+Also shows the maximal bond dimension χ_max and evolution step times.
 
 Saves a PDF and PNG under `plots/single_with_ed/<basename>` unless `outfile` is provided.
 Returns the Makie Figure.
@@ -192,21 +208,104 @@ function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}
       key = round(tt, digits=8)
       if haskey(ed_map, key)
         j = ed_map[key]
+        diff = abs(ed_imb[j] - sim_imb[i])
+        diff > 0 || continue
         push!(T, tt)
-        push!(D, abs(ed_imb[j] - sim_imb[i]))
+        push!(D, diff)
       end
     end
   end
 
+  # Prepare auxiliary data for bond dimension and step time
+  t_md = Float64[]
+  d_md = Float64[]
+  if !isempty(cfg.observer.maxdim)
+    for pair in cfg.observer.maxdim
+      time = first(pair)
+      time > 0 || continue
+      ld = last(pair)
+      maxd = try
+        maximum(ld[e] for e in edges(ld))
+      catch
+        try
+          maximum(values(ld))
+        catch
+          NaN
+        end
+      end
+      isfinite(maxd) && maxd > 0 || continue
+      push!(t_md, time)
+      push!(d_md, maxd)
+    end
+  end
+
+  rt_times = Float64[]
+  rt_vals = Float64[]
+  if !isempty(cfg.observer.ex_times) && !isempty(times)
+    n = min(length(times), length(cfg.observer.ex_times))
+    for idx in 1:n
+      val = cfg.observer.ex_times[idx]
+      isfinite(val) && val > 0 || continue
+      time_val = times[idx]
+      time_val > 0 || continue
+      push!(rt_times, time_val)
+      push!(rt_vals, val)
+    end
+  end
+
   # Plot
-  fig = Figure(size=(10cm, 6cm))
-  ax = Axis(fig[1, 1], xlabel="t", ylabel="|ED − TN| imbalance", title="L=$(L), h=$(h), grid=$(grid)")
+  fig = Figure(size=(12cm, 13cm))
+  ax = Axis(fig[1, 1],
+    xlabel="t",
+    ylabel="|ED − TN| imbalance",
+    title="L=$(L), h=$(h), grid=$(grid)",
+    yscale=log10,
+    xscale=log10,
+  )
+  ax_md = Axis(fig[2, 1],
+    xlabel="t",
+    ylabel=L"\chi_{\max}",
+    xscale=log10,
+  )
+  ax_rt = Axis(fig[3, 1],
+    xlabel="t",
+    ylabel=L"\Delta t_{\mathrm{step}} = t_i - t_{i-1}\,[\mathrm{s}]",
+    yscale=log10,
+    xscale=log10,
+  )
+
+  linkxaxes!(ax, ax_md, ax_rt)
+
   if !isempty(T)
     lines!(ax, T, D; color=:steelblue, label="ED − TN")
-    hlines!(ax, [0.0]; color=:gray, linestyle=:dot)
+    ax.yticks = ([1e-2, 1e-5, 1e-8, 1e-11], [L"10^{-2}", L"10^{-5}", L"10^{-8}", L"10^{-11}"])
   else
     @warn "No common time grid with ED found; cannot plot ED − TN differences."
   end
+
+  if !isempty(t_md)
+    order = sortperm(t_md)
+    lines!(ax_md, t_md[order], d_md[order]; color=:forestgreen)
+    ax_md.yticks = ([32, 64, 128], ["32", "64", "128"])
+  else
+    @warn "No bond-dimension data available for plotting."
+  end
+
+  if !isempty(rt_times)
+    lines!(ax_rt, rt_times, rt_vals; color=:darkorange)
+    kmin = floor(Int, log10(minimum(rt_vals)))
+    kmax = ceil(Int, log10(maximum(rt_vals)))
+    ax_rt.yticks = logticks1(kmin, kmax)
+  else
+    @warn "No positive step-time samples available for plotting."
+  end
+
+  xtick_positions = [0.1, 1.0, 10.0]
+  xtick_labels = ["0.1", "1", "10"]
+  ax.xticks = (xtick_positions, xtick_labels)
+  ax_md.xticks = (xtick_positions, xtick_labels)
+  ax_rt.xticks = (xtick_positions, xtick_labels)
+
   try
     axislegend(ax; position=:rb)
   catch
@@ -271,14 +370,38 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
   ed_times = ed_imb === nothing ? Float64[] : collect(0.1:0.1:0.1*length(ed_imb))
 
   # Prepare plot with subplots for max bond dimension and step time
-  fig = Figure(size=(12cm, 13cm))
-  ax = Axis(fig[1, 1], xlabel="t", ylabel="|ED − TN| imbalance", title="L=$(L), h=$(h), grid=$(grid)", yscale=log10)
-  ax_md = Axis(fig[2, 1], xlabel="t", ylabel="maxlinkdim")
-  ax_rt = Axis(fig[3, 1], xlabel="t", ylabel="step time [s]")
+  fig = Figure(size=(400, 400), fontsize=8pt)
+  ax = Axis(fig[1, 1],
+    xlabel="t",
+    ylabel="|ED − TN| imbalance",
+    title="L=$(L), h=$(h), grid=$(grid)",
+    yscale=log10,
+    xscale=log10,
+  )
+  ax_md = Axis(fig[2, 1],
+    xlabel="t",
+    ylabel=L"\chi_{\max}",
+    xscale=log10,
+  )
+  ax_rt = Axis(fig[3, 1],
+    xlabel="t",
+    ylabel=L"\Delta t_{\mathrm{step}}",
+    xscale=log10,
+  )
+
+  linkxaxes!(ax, ax_md, ax_rt)
+
+  xtick_positions = [0.1, 1.0, 10.0]
+  xtick_labels = ["0.1", "1", "10"]
+  ax.xticks = (xtick_positions, xtick_labels)
+  ax_md.xticks = (xtick_positions, xtick_labels)
+  ax_rt.xticks = (xtick_positions, xtick_labels)
 
   # Colors/labels
-  default_labels = [basename(dir) for dir in sim_dirs]
+  default_labels = [dir_label(dir) for dir in sim_dirs]
   labels = isnothing(labels) ? default_labels : labels
+
+  all_rt_vals = Float64[]
 
   # Use magma colormap for consistency with other plots
   ncurves = length(sim_dirs)
@@ -302,11 +425,14 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
     T = Float64[]
     D = Float64[]
     for (k, tt) in pairs(times)
+      tt <= 0 && continue
       key = round(tt, digits=8)
       if haskey(ed_map, key)
         j = ed_map[key]
+        diff = abs(ed_imb[j] - sim_imb[k])
+        diff > 0 || continue
         push!(T, tt)
-        push!(D, abs.(ed_imb[j] - sim_imb[k]))
+        push!(D, diff)
       end
     end
     if !isempty(T)
@@ -320,7 +446,8 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
       t_md = Float64[]
       d_md = Float64[]
       for pair in cfg.observer.maxdim
-        push!(t_md, first(pair))
+        time = first(pair)
+        time <= 0 && continue
         ld = last(pair)
         # Try to compute max over edges; fallback to values
         maxd = try
@@ -332,23 +459,46 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
             NaN
           end
         end
+        isfinite(maxd) && maxd > 0 || continue
+        push!(t_md, time)
         push!(d_md, maxd)
       end
-      p = sortperm(t_md)
-      lines!(ax_md, t_md[p], d_md[p]; color=colors[(i-1)%length(colors)+1])
+      if !isempty(t_md)
+        p = sortperm(t_md)
+        lines!(ax_md, t_md[p], d_md[p]; color=colors[(i-1)%length(colors)+1], label=labels[i])
+      end
     end
 
     # Plot execution time per step
     if !isempty(cfg.observer.ex_times) && !isempty(times)
       n = min(length(times), length(cfg.observer.ex_times))
-      lines!(ax_rt, times[1:n], cfg.observer.ex_times[1:n]; color=colors[(i-1)%length(colors)+1])
+      rt_times = Float64[]
+      rt_vals = Float64[]
+      for idx in 1:n
+        tval = times[idx]
+        ex = cfg.observer.ex_times[idx]
+        (tval > 0 && isfinite(ex) && ex > 0) || continue
+        push!(rt_times, tval)
+        push!(rt_vals, ex)
+      end
+      if !isempty(rt_times)
+        lines!(ax_rt, rt_times, rt_vals; color=colors[(i-1)%length(colors)+1])
+        append!(all_rt_vals, rt_vals)
+      end
     end
   end
-  # Reference line at zero
-  hlines!(ax, [0.0]; color=:gray, linestyle=:dot)
+  ax.yticks = ([1e-2, 1e-5, 1e-8, 1e-11], [L"10^{-2}", L"10^{-5}", L"10^{-8}", L"10^{-11}"])
+  ax_md.yticks = ([32, 64, 128], ["32", "64", "128"])
+  ax_rt.yticks = ([5, 10, 20])
+  # if !isempty(all_rt_vals)
+  #   kmin = floor(Int, log10(minimum(all_rt_vals)))
+  #   kmax = ceil(Int, log10(maximum(all_rt_vals)))
+  #   ax_rt.yticks = logticks1(kmin, kmax)
+  # end
 
+  axislegend(ax_md; position=:rb)
   try
-    axislegend(ax; position=:rb)
+    axislegend(ax_md; position=:rb)
   catch
   end
 
@@ -2652,7 +2802,7 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
     return
   end
   # Keep desired χ range and non-empty time series; allow varying end times
-  df_filtered = filter(row -> row.initial_state_initial_maxdim >= 128 && !isempty(row.times), df_filtered)
+  df_filtered = filter(row -> row.initial_state_initial_maxdim >= 32 && !isempty(row.times), df_filtered)
 
   fig = Figure(fontsize=11pt)
   ax = Axis(fig[1, 1], xlabel=L"t", ylabel="Mean Imbalance", title="L=$L, h=$h")
@@ -2716,6 +2866,10 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
     mean_vals = stat_max.mean
     stderr_vals = stat_max.stderr
 
+    # if type == "HilbertCurve"
+    #   mean_vals = 1 .- 2 .* (1 .- mean_vals)
+    # end
+
     color = get(ColorSchemes.magma, fracs[i])
     style = linestyles[(i-1)%length(linestyles)+1]
     label = "$(labels[type]), D=$Dmax"
@@ -2754,38 +2908,60 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
 
 end
 
-function main(df; dir, L_values=[4, 6, 8, 10], individual=false)
-  if individual
-    plot_individual_imbalance(df, L_values; dir)
-    plot_individual_imbalance_error(df, L_values; dir)
+function plot_all_imbalance(f; dir)
+
+end
+
+function main(df; dir::Union{Nothing,String}=nothing, L_values=nothing, individual=false)
+  if :graph_L ∉ propertynames(df)
+    error("DataFrame must contain a :graph_L column to infer system sizes")
   end
+
+  inferred_Ls = sort!(collect(Set(skipmissing(df.graph_L))))
+  isempty(inferred_Ls) && error("No L values found in DataFrame; provide L_values explicitly")
+
+  if isnothing(L_values)
+    L_values = inferred_Ls
+  else
+    L_values = collect(L_values)
+  end
+  isempty(L_values) && error("L_values cannot be empty")
+
+  auto_dir = isnothing(dir)
+  base_dir = auto_dir ? (length(L_values) == 1 ? "L$(first(L_values))" : "combined") : dir
+
+  if individual
+    plot_individual_imbalance(df, L_values; dir=base_dir)
+    plot_individual_imbalance_error(df, L_values; dir=base_dir)
+  end
+
   for L in L_values
+    current_dir = auto_dir && length(L_values) > 1 ? joinpath(base_dir, "L$(L)") : base_dir
     println("Generating plots for L=$L")
     for h in [0.0, 5.0, 10.0, 20.0, 30.0, 50.0]
-      plot_mean_imbalance(df; L=L, h, dir)
+      plot_mean_imbalance(df; L=L, h, dir=current_dir)
     end
-    plot_accuracy_convergence(df; L=L, dir)
-    plot_accuracy_vs_parameters(df; L=L, dir)
-    plot_runtime_vs_parameters(df; L=L, dir)
-    plot_accuracy_vs_runtime(df; L=L, dir)
-    plot_params_runtime_colored_by_runtime(df; L=L, dir)
+    plot_accuracy_convergence(df; L=L, dir=current_dir)
+    plot_accuracy_vs_parameters(df; L=L, dir=current_dir)
+    plot_runtime_vs_parameters(df; L=L, dir=current_dir)
+    plot_accuracy_vs_runtime(df; L=L, dir=current_dir)
+    plot_params_runtime_colored_by_runtime(df; L=L, dir=current_dir)
   end
-  plot_error_vs_disorder(df; dir)
-  plot_error_vs_system_size(df; dir)
-  # New: β vs h plots using grid-averaged imbalance at highest χ per method
+
+  plot_error_vs_disorder(df; dir=base_dir)
+  plot_error_vs_system_size(df; dir=base_dir)
   plot_beta_vs_disorder(df;
     L_values=L_values,
     h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
-    dir=dir,
+    dir=base_dir,
     tmin=50.0,
     tmax=100.0,
     xlim=(0.0, 50.0),
     ylim=(0.0, 1.0),
   )
-  # New: Overlay fitted power-law with averaged imbalance per (L, h)
   plot_fit_vs_mean(df;
     L_values=L_values,
     h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
-    dir=dir,
+    dir=base_dir,
   )
 end

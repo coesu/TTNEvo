@@ -250,13 +250,8 @@ function _build_graph(graph_type::HilbertCurve)
   L = graph_type.L
   gridnum = graph_type.gridnum
 
-  local h_grid
-  try
-    data = load(joinpath("data", "grid", "L=$(L)_gridnum=$gridnum.jld2"))
-    h_grid = data["grid"]
-  catch
-    h_grid = rand(L, L)
-  end
+  data = load(joinpath("data", "grid", "L=$(L)_gridnum=$gridnum.jld2"))
+  h_grid = data["grid"]
 
   s = hilbert_curve("A", log2(L))
   g = parse_hilbert_curve(s, L)

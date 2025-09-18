@@ -2,14 +2,14 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [12]
+L = [8]
 h = [20.0]
 
 time_step = [0.1]
-total_time = [100.0]
+total_time = [10.0]
 time_evo_method = [:onesite]
 
-maxdim = [32, 64, 128, 196]
+maxdim = [32]
 # maxdim = [64]
 cutoff = [1e-12]
 nsite = [1]
@@ -25,9 +25,9 @@ save_path_training = "data/train"
 
 tree_pre_det = false
 tree_opt = false
-snake = false
+snake = true
 hilbert = true
-hierachical = true
+hierachical = false
 
 parameter_sets = []
 for Li in L,
@@ -77,7 +77,7 @@ for Li in L,
     push!(parameter_sets, TreeConfig(
       TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
       InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
-      "L$Li-column-snake-new",
+      "test-L$Li-column-snake-new",
       HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
       SnakeGraph(Li, grid_numberi, false, true),
       Observer()
@@ -87,7 +87,7 @@ for Li in L,
     push!(parameter_sets, TreeConfig(
       TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
       InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
-      "L$Li-column-hilbert",
+      "test-L$Li-column-hilbert",
       HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
       HilbertCurve(Li, grid_numberi, false, true),
       Observer()
@@ -106,7 +106,16 @@ end
 total_combinations = length(parameter_sets)
 @show total_combinations
 
+test_config = TreeConfig(
+  TimeEvolutionConfig(t_range=(0, 1.0), t_step=0.1, maxdim=10, nsite=1, cutoff=1e-12, qns=false, method=:cbe),
+  InitialStateConfig(:columnar_neel, Dict(:initial_maxdim => 10, :qns => false)),
+  "tn",
+  HeisenbergModel(J1=1.0, JZ=1.0, h=0.0),
+  HilbertCurve(8, 1, false, true),
+  Observer()
+)
 export test_run
+
 function test_run(config)
 
   check_for_previous_run = false
