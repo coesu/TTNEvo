@@ -1,4 +1,5 @@
 using CairoMakie
+using CairoMakie: hidexdecorations!, linkxaxes!, linkyaxes!
 using Printf
 using TTNEvo
 using NamedGraphs
@@ -373,8 +374,8 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
   fig = Figure(size=(400, 400), fontsize=8pt)
   ax = Axis(fig[1, 1],
     xlabel="t",
-    ylabel="|ED − TN| imbalance",
-    title="L=$(L), h=$(h), grid=$(grid)",
+    ylabel=L"|I_{\mathrm{ED}} - I_{\mathrm{TN}}|",
+    title="L=$(L), h=$(h), grid=$(grid), test",
     yscale=log10,
     xscale=log10,
   )
@@ -385,11 +386,18 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
   )
   ax_rt = Axis(fig[3, 1],
     xlabel="t",
-    ylabel=L"\Delta t_{\mathrm{step}}",
+    ylabel=L"t_{\mathrm{step}}",
     xscale=log10,
   )
 
   linkxaxes!(ax, ax_md, ax_rt)
+
+  # remove redundant x-axis labels/ticks from top and middle plots
+  ax.xlabelvisible = false
+  ax.xticklabelsvisible = false
+  ax_md.xlabelvisible = false
+  ax_md.xticklabelsvisible = false
+
 
   xtick_positions = [0.1, 1.0, 10.0]
   xtick_labels = ["0.1", "1", "10"]
@@ -496,11 +504,11 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
   #   ax_rt.yticks = logticks1(kmin, kmax)
   # end
 
-  axislegend(ax_md; position=:rb)
-  try
-    axislegend(ax_md; position=:rb)
-  catch
-  end
+  Label(fig[1, 1, TopLeft()], "a)", fontsize=9, font=:bold, halign=:left, padding=(0, 0, -10, 0))
+  Label(fig[2, 1, TopLeft()], "b)", fontsize=9, font=:bold, halign=:left, padding=(0, 0, -10, 0))
+  Label(fig[3, 1, TopLeft()], "c)", fontsize=9, font=:bold, halign=:left, padding=(0, 0, -10, 0))
+
+  Legend(fig[2, 2], ax_md)
 
   base = isnothing(outfile) ? joinpath("plots", "single_with_ed", @sprintf("comparison_L%d_h%.1f_g%d", L, h, grid)) : outfile
   mkpath(dirname(base))
@@ -907,7 +915,6 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   min_len_benchmark = minimum(length, benchmark_imbalances)
   min_len_current = minimum(length, current_imbalances)
   min_len = min(min_len_benchmark, min_len_current)
-  @show min_len
   if min_len == 0
     return nothing, nothing, df_current_common
   end
@@ -916,7 +923,6 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   error = abs.(benchmark_matrix .- current_matrix)
   error = mean(error, dims=1)
   mean_error = exp.(mean(log.(error)))
-  @show mean_error
   std_error = min(std(error), mean_error * 0.9) / sqrt(length(error))
 
   return mean_error, std_error, df_current_common
@@ -1763,8 +1769,6 @@ function plot_accuracy_vs_parameters(df::DataFrame; L::Int, dir)
   return fig
 end
 
-
-
 function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
   graph_types = sort(unique(filter(row -> row.graph_L == L, df).graph_type))
@@ -1894,8 +1898,8 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
     ax = Axis(grid[1, h_idx]; yscale=log10)
     push!(axes, ax)
 
-    ax.xticks = WilkinsonTicks(5)
-    ax.yticks = LogTicks(WilkinsonTicks(3))
+    ax.xticks = WilkinsonTicks(7)
+    ax.yticks = LogTicks(WilkinsonTicks(5))
     if h_idx != 1
       hideydecorations!(ax, grid=false)
     end
@@ -1994,6 +1998,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
       params = Float64[]
       runtimes = Float64[]
       errors = Float64[]
+      stds = Float64[]
 
       end_idx = use_ed_benchmark ? 0 : 1
       for maxdim in maxdims[1:end-end_idx]
@@ -2014,6 +2019,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
         rt = average_runtime(df_current_common)
         push!(runtimes, rt)
         push!(params, average_num_params(df_current_common) / scaling)
+        push!(stds, serr)
 
         if rt < global_rt_min
           global_rt_min = rt
@@ -2024,7 +2030,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
       end
 
       if !isempty(params)
-        push!(series_list, (type=type, type_idx=type_idx, params=params, runtimes=runtimes, errors=errors))
+        push!(series_list, (type=type, type_idx=type_idx, params=params, runtimes=runtimes, errors=errors, stds=stds))
       end
     end
     data_by_h[h] = series_list
@@ -2036,7 +2042,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   end
 
   # Plot with standard size to align with other figures/LaTeX
-  fig = Figure(size=multiplot_size(), fontsize=11)
+  fig = Figure(size=multiplot_size(), fontsize=11, figure_padding=6)
   grid = fig[1, 2] = GridLayout()
   fig[1, 1] = Label(fig, "Error"; rotation=π / 2, tellheight=false)
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
@@ -2049,8 +2055,16 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
     ax = Axis(grid[1, h_idx]; yscale=log10)
     push!(axes, ax)
 
-    ax.xticks = WilkinsonTicks(5)
-    ax.yticks = LogTicks(WilkinsonTicks(3))
+    if L == 4
+      ax.xticks = ([0, 0.5, 1])
+    end
+    if L == 12
+      ax.yticks = ([10.0^(-x) for x in 1:1:12], [L"10^{-%$x}" for x in 1:1:12])
+      ylims!(ax, (1e-3, 1e-2))
+    else
+      ax.yticks = ([10.0^(-x) for x in 2:2:12], [L"10^{-%$x}" for x in 2:2:12])
+    end
+
     if h_idx != 1
       hideydecorations!(ax, grid=false)
     end
@@ -2069,6 +2083,10 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
         order = sortperm(s.params)
         lines!(ax, s.params[order], s.errors[order]; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
       end
+      errorbars!(ax, s.params, s.errors, s.stds;
+        color=:black,
+        whiskerwidth=4
+      )
       scatter!(ax, s.params, s.errors;
         color=s.runtimes,
         colormap=:magma,
@@ -2082,7 +2100,11 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
       )
     end
     if h_idx == 1
-      axislegend(ax; position=(0.6, 0.12), framevisible=false, patchlabelgap=-4)
+      if L == 12
+        axislegend(ax; position=(0.05, 0.12), framevisible=false, patchlabelgap=-4)
+      else
+        axislegend(ax; position=(0.6, 0.12), framevisible=false, patchlabelgap=-4)
+      end
     end
   end
 
@@ -2242,7 +2264,7 @@ function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
 
   # Outer layout: col 1 = shared ylabel, col 2 = plots grid
   grid = fig[1, 2] = GridLayout()
-  fig[1, 1] = Label(fig, "Error"; rotation=π / 2, tellheight=false, padding=(0, 0, 0, 0))
+  fig[1, 1] = Label(fig, L"|I_{\mathrm{ED}} - I_{\mathrm{TN}}|"; rotation=π / 2, tellheight=false, padding=(0, 0, 0, 0))
 
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   colors = wong_colors()
@@ -2365,16 +2387,78 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
           continue
         end
 
-        fig = Figure(fontsize=8pt)
-        axes = [Axis(fig[i, 1],
-          title=L"%$(gtype) $h=%$h$, $L=%$L$",
-          xlabel=L"t",
-          ylabel=L"I",
-          xscale=log10,
-          xticks=[0.1, 1, 10, 100],
-          limits=(0.1, 100, nothing, nothing)
-        ) for (i, gtype) in enumerate(graph_types)
-        ]
+        local fig
+        if L == 4
+          fig = Figure(fontsize=8pt, size=(600, 450), figure_padding=5)
+        else
+          fig = Figure(fontsize=8pt, size=(600, 225), figure_padding=5)
+        end
+        axes_imbalance = Axis[]
+        axes_error = Axis[]
+        axis_labels = Any[]
+        error_mins = Float64[]
+        error_maxs = Float64[]
+
+        ed_imbalance = nothing
+        if L == 4
+          ed_data, _ = get_ed_benchmark(L, h, [grid])
+          if !isempty(ed_data)
+            ed_imbalance = ed_data
+          end
+        end
+
+        # Pre-compute benchmark (highest χ) per graph type in case ED is unavailable
+        benchmark_series = Dict{String,NamedTuple}()
+
+        for (i, gtype) in enumerate(graph_types)
+          ax_imb = Axis(fig[i, 1],
+            xlabel=L"t",
+            ylabel=L"I",
+            xscale=log10,
+            # xticks=[0.1, 1, 10, 100],
+            xticks=logticks1_with_minors(-1, 2),
+            limits=(0.1, 100, nothing, nothing),
+          )
+          ax_err = Axis(fig[i, 2],
+            xlabel=L"t",
+            ylabel=L"|I_{\mathrm{ED}} - I_{\mathrm{TN}}|",
+            xscale=log10,
+            yscale=log10,
+            xticks=logticks1_with_minors(-1, 2),
+          )
+
+          xlims!(ax_err, (0.1, 100.0))
+          ylims!(ax_err, (1e-12, 1))
+
+          push!(axes_imbalance, ax_imb)
+          push!(axes_error, ax_err)
+          label_txt = get(labels, gtype, string(gtype))
+          push!(axis_labels, L"%$(label_txt) $h=%$h$, $L=%$L$")
+          push!(error_mins, Inf)
+          push!(error_maxs, 0.0)
+
+          if ed_imbalance === nothing
+            df_graph = filter(row -> row.graph_type == gtype, dfi)
+            if !isempty(df_graph)
+              maxdims = sort(unique(df_graph.initial_state_initial_maxdim))
+              if !isempty(maxdims)
+                benchmark_maxdim = maximum(maxdims)
+                benchmark_row_list = filter(row -> row.initial_state_initial_maxdim == benchmark_maxdim, df_graph)
+                if !isempty(benchmark_row_list)
+                  benchmark_row = first(benchmark_row_list)
+                  benchmark_series[gtype] = (times=benchmark_row.times, values=benchmark_row.imbalance, maxdim=benchmark_maxdim)
+                end
+              end
+            end
+          end
+        end
+
+        if length(axes_error) > 1
+          linkxaxes!(axes_imbalance...)
+          linkyaxes!(axes_imbalance...)
+          linkxaxes!(axes_error...)
+          linkyaxes!(axes_error...)
+        end
 
         Ds = unique(dfi.initial_state_initial_maxdim)
         Ds_sorted = sort(Ds, rev=true)
@@ -2384,189 +2468,106 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
           Dict(D => 0.5 for (i, D) in enumerate(Ds_sorted))
         end
 
-        for (i, gtype) in enumerate(graph_types)
-          ax = axes[i]
+        for (idx, gtype) in enumerate(graph_types)
+          ax_imb = axes_imbalance[idx]
+          ax_err = axes_error[idx]
           df_graph = filter(row -> row.graph_type == gtype, dfi)
 
           for d in eachrow(df_graph)
             Dval = D_to_val[d.initial_state_initial_maxdim]
             color = get(ColorSchemes.viridis, Dval)
-            lines!(ax, d.times, d.imbalance,
+            lines!(ax_imb, d.times, d.imbalance;
               label=L"\chi=%$(d.initial_state_initial_maxdim)",
               color=color)
-          end
 
-          if L == 4
-            ed, _ = get_ed_benchmark(L, h, [grid])
-            max_T = maximum(maximum.(df_graph.times))
-            time = 0.1:0.1:max_T
-            max_ind = length(time)
-            if !isempty(ed)
-              lines!(ax, time, ed[1:max_ind], label="ED", color=:black)
+            if ed_imbalance !== nothing
+              series = compute_ed_error_series(d.times, d.imbalance, ed_imbalance)
+              series === nothing && continue
+              times_err, error = series
+              err_vals = error .+ 1e-16
+              lines!(ax_err, times_err, err_vals; color=color)
+              error_mins[idx] = min(error_mins[idx], minimum(err_vals))
+              error_maxs[idx] = max(error_maxs[idx], maximum(err_vals))
+            else
+              bench = get(benchmark_series, gtype, nothing)
+              bench === nothing && continue
+              if d.initial_state_initial_maxdim == bench.maxdim
+                continue
+              end
+              series = compute_benchmark_error_series(d.times, d.imbalance, bench.times, bench.values)
+              series === nothing && continue
+              times_err, error = series
+              err_vals = error .+ 1e-16
+              lines!(ax_err, times_err, err_vals; color=color)
+              error_mins[idx] = min(error_mins[idx], minimum(err_vals))
+              error_maxs[idx] = max(error_maxs[idx], maximum(err_vals))
             end
           end
 
-          # Mark earliest divergence time between largest and next-largest χ
-          # begin
-          #   threshold = 0.01 / 2.0
-          #   divpt = earliest_divergence(df_graph; threshold)
-          #   if divpt !== nothing
-          #     tdiv, ydiv = divpt
-          #     # draw vertical marker and a star at the max-D curve
-          #     vlines!(ax, [tdiv]; color=:black, linestyle=:dash, linewidth=1.5)
-          #     scatter!(ax, [tdiv], [ydiv]; color=:black, marker=:star5, markersize=9)
-          #     # Optional small annotation
-          #     text!(ax, tdiv, ydiv; text=L"\Delta>%$(threshold)", align=(:left, :top), color=:black, fontsize=7)
-          #   end
-          # end
-          try
-            Legend(fig[1:2, 2], axes[1])
-          catch
+          if ed_imbalance !== nothing
+            max_T = maximum(maximum.(df_graph.times))
+            max_T = min(max_T, 0.1 * length(ed_imbalance))
+            if max_T >= 0.1
+              time = 0.1:0.1:max_T
+              lines!(ax_imb, time, ed_imbalance[1:length(time)]; label="ED", color=:black)
+            end
+          end
+        end
+
+        for (idx, ax) in enumerate(axes_imbalance)
+          text!(ax, 0.98, 0.98;
+            text=axis_labels[idx],
+            align=(:right, :top),
+            space=:relative)
+          if idx != length(axes_imbalance)
+            hidexdecorations!(ax, grid=false, label=true)
+            ax.xlabelvisible = false
+          end
+        end
+
+        for (idx, ax) in enumerate(axes_error)
+          # text!(ax, 0.02, 0.98;
+          #   text=L"\text{Error}",
+          #   align=(:left, :top),
+          #   space=:relative)
+          if isfinite(error_mins[idx]) && error_maxs[idx] > 0
+            kmin_est = floor(Int, log10(error_mins[idx]))
+            kmax_est = ceil(Int, log10(error_maxs[idx]))
+            even_floor_exp = iseven(kmin_est) ? kmin_est : kmin_est - 1
+            even_ceil_exp = iseven(kmax_est) ? kmax_est : kmax_est + 1
+            start_exp = min(even_floor_exp, -2)
+            end_exp = max(even_ceil_exp, start_exp)
+            exps = collect(start_exp:2:end_exp)
+            positions = Float64[10.0^k for k in exps]
+            labels = [L"10^{%$k}" for k in exps]
+            ax.yticks = (positions, labels)
+          end
+          if idx != length(axes_error)
+            hidexdecorations!(ax, grid=false, label=true)
+            ax.xlabelvisible = false
           end
         end
 
         plot_dir = joinpath("plots", dir, "individual")
         mkpath(plot_dir)
-        save(joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).pdf"), fig)
-        save(joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).png"), fig)
+
+        try
+          Legend(fig[1:length(graph_types), 3], axes_imbalance[1]; merge=true)
+        catch
+        end
+
+        pdf_path = joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).pdf")
+        png_path = joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).png")
+        save(pdf_path, fig)
+        save(png_path, fig)
+        println("Saved combined imbalance plot to $(pdf_path) and $(png_path)")
       end
     end
   end
 end
 
 function plot_individual_imbalance_error(df, L_values=[4, 6, 8]; dir)
-  for L in L_values
-    h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
-    for h in h_values
-      gridnum_values = sort(unique(filter(row -> row.model_h == h && row.graph_L == L, df).graph_gridnum))
-      for grid in gridnum_values
-        println("Plotting Imbalance Error for L=$(L) h=$(h) grid=$(grid)")
-        dfi = filter(row -> row.graph_L == L && row.model_h == h && row.graph_gridnum == grid, df)
-        dfi = sort(dfi, [:graph_type, :initial_state_initial_maxdim])
-
-        if nrow(dfi) == 0
-          continue
-        end
-
-        graph_types = sort(unique(dfi.graph_type))
-        if isempty(graph_types)
-          continue
-        end
-
-        fig = Figure(fontsize=8pt)
-        axes = [Axis(fig[i, 1],
-          title=L"%$(gtype) $h=%$h$, $L=%$L$",
-          xlabel=L"t",
-          ylabel=L"\mathrm{Error}(\,I\,)",
-          xscale=log10,
-          xticks=logticks1_with_minors(-1, 2),
-          yscale=log10) for (i, gtype) in enumerate(graph_types)
-        ]
-
-        ax_insets = [Axis(fig[i, 1];
-          width=Relative(0.4),
-          height=Relative(0.4),
-          halign=0.95,
-          valign=0.20,
-          title=L"\text{Moving Avg.}",
-          yscale=log10,
-          # xticks=LogTicks([1, 5, 10, 50, 100]),
-          xticks=logticks1(-1, 2),
-          xscale=log10,
-        ) for i in 1:length(graph_types)]
-
-        if length(axes) > 1
-          linkyaxes!(axes...)
-          linkyaxes!(ax_insets...)
-        end
-
-        Ds = unique(dfi.initial_state_initial_maxdim)
-        Ds_sorted = sort(Ds, rev=true)
-        D_to_val = if length(Ds_sorted) > 1
-          Dict(D => (i - 1) / (length(Ds_sorted) - 1) for (i, D) in enumerate(Ds_sorted))
-        else
-          Dict(D => 0.5 for (i, D) in enumerate(Ds_sorted))
-        end
-
-        if L == 4
-          ed_imbalance, _ = get_ed_benchmark(L, h, [grid])
-          if isempty(ed_imbalance)
-            @warn "No ED benchmark for L=4, h=$h, grid=$grid. Skipping."
-            continue
-          end
-          for (i, gtype) in enumerate(graph_types)
-            ax = axes[i]
-            ax_inset = ax_insets[i]
-            df_graph = filter(row -> row.graph_type == gtype, dfi)
-            for d in eachrow(df_graph)
-              series = compute_ed_error_series(d.times, d.imbalance, ed_imbalance)
-              series === nothing && continue
-              common_times, error = series
-              Dval = D_to_val[d.initial_state_initial_maxdim]
-              color = get(ColorSchemes.viridis, Dval)
-              lines!(ax, common_times, error .+ 1e-16,
-                label=L"\chi=%$(d.initial_state_initial_maxdim)",
-                color=color)
-              window = 100
-              if length(error) > window
-                ma_error = moving_average(error, window)
-                ma_times = common_times[window÷2:length(ma_error)+window÷2-1]
-                lines!(ax_inset, ma_times, ma_error .+ 1e-16; color=color)
-              end
-            end
-          end
-        else
-          for (i, gtype) in enumerate(graph_types)
-            ax = axes[i]
-            ax_inset = ax_insets[i]
-            df_graph = filter(row -> row.graph_type == gtype, dfi)
-            if nrow(df_graph) < 2
-              continue
-            end
-            maxdims = sort(unique(df_graph.initial_state_initial_maxdim))
-            benchmark_maxdim = maximum(maxdims)
-            benchmark_row_list = filter(row -> row.initial_state_initial_maxdim == benchmark_maxdim, df_graph)
-            isempty(benchmark_row_list) && continue
-            benchmark_row = first(benchmark_row_list)
-            b_times = benchmark_row.times
-            b_vals = benchmark_row.imbalance
-            for d in eachrow(df_graph)
-              if d.initial_state_initial_maxdim == benchmark_maxdim
-                continue
-              end
-              series = compute_benchmark_error_series(d.times, d.imbalance, b_times, b_vals)
-              series === nothing && continue
-              times_to_plot, error = series
-              Dval = D_to_val[d.initial_state_initial_maxdim]
-              color = get(ColorSchemes.viridis, Dval)
-              lines!(ax, times_to_plot, error .+ 1e-16,
-                label=L"\chi=%$(d.initial_state_initial_maxdim)",
-                color=color)
-              window = 50
-              if length(error) > window
-                ma_error = moving_average(error, window)
-                ma_times = times_to_plot[window÷2:length(ma_error)+window÷2-1]
-                lines!(ax_inset, ma_times, ma_error .+ 1e-16; color=color)
-              end
-            end
-          end
-        end
-
-        try
-          Legend(fig[1:2, 2], axes[1])
-        catch
-        end
-
-        plots_dir = joinpath("plots", dir, "individual_error")
-        mkpath(plots_dir)
-        filename = "imbalance_error_L=$(L)_h=$(h)_grid=$(grid).pdf"
-        save(joinpath(plots_dir, filename), fig)
-        filename = "imbalance_error_L=$(L)_h=$(h)_grid=$(grid).png"
-        save(joinpath(plots_dir, filename), fig)
-        println("Saved plot to $(joinpath(plots_dir, filename))")
-      end
-    end
-  end
+  @info "plot_individual_imbalance_error merged into plot_individual_imbalance; skipping separate output."
 end
 
 
