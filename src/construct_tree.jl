@@ -585,9 +585,9 @@ end
 export build_graph
 
 
-function generate_grids(L, number_of_grids)
-  for gridnum in 1:number_of_grids
-    grid = rand(rng, L, L)
+function generate_grids(L, start, number_of_grids)
+  for gridnum in start:number_of_grids
+    grid = rand(L, L)
     file = "data/grid/L=$(L)_gridnum=$gridnum.jld2"
     jldopen(file, "w") do file
       file["grid"] = grid

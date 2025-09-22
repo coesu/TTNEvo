@@ -381,7 +381,7 @@ function generate_tree_filename(L_val, h_val, gridnum, maxdim)
   base_string = "$(graph_l)_L=$(L_val)_gridnum=$(gridnum)_h=$(formatted_h)_maxdim=$(maxdim)"
   base_string = replace(base_string, "/" => "_", "\\" => "_", ":" => "_")
 
-  return joinpath("data", "tree_structures", "$(base_string)_tree.jld2")
+  return joinpath("data", "tree_structures_beta", "$(base_string)_tree.jld2")
 end
 
 export generate_tree_filename
@@ -398,7 +398,7 @@ function generate_tree_filename(config)
   base_string = "$(graph_l)_L=$(L_val)_gridnum=$(gridnum)_h=$(formatted_h)_maxdim=$(maxdim)"
   base_string = replace(base_string, "/" => "_", "\\" => "_", ":" => "_")
 
-  return joinpath("data", "tree_structures", "$(base_string)_tree.jld2")
+  return joinpath("data", "tree_structures_beta", "$(base_string)_tree.jld2")
 end
 
 graph_label(c::TreeGraph) = "tree"

@@ -618,25 +618,56 @@ end
 """
   compute_beta_over_gridmean(df; L, h, tmin=5.0, tmax=50.0)
 
-For fixed (L, h), take the highest available χ per `graph_type`, compute the
-mean imbalance across gridnums, and fit β from t^{−β} on [tmin, tmax].
-Returns a Dict keyed by `graph_type::String` with values `(beta, stderr, npts, r2, Dmax)`.
+For fixed (L, h), take the highest available χ per `graph_type`, fit β for each individual
+simulation on [tmin, tmax], and then average the fitted parameters. Returns a Dict keyed by
+`graph_type::String` with values `(beta, stderr, npts, r2, A, Dmax, nfits)`.
 """
 function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tmax::Real=50.0)
   df_lh = filter(row -> row.graph_L == L && row.model_h == h, df)
   isempty(df_lh) && return Dict{String,NamedTuple}()
-  # Only keep non-empty times
   df_lh = filter(row -> !isempty(row.times), df_lh)
-  stats = compute_mean_imbalance_stats(df_lh)
+
   out = Dict{String,NamedTuple}()
-  for type in sort(unique(first.(keys(stats))))
-    Ds_type = sort([D for (t, D) in keys(stats) if t == type])
-    isempty(Ds_type) && continue
-    Dmax = Ds_type[end]
-    st = stats[(type, Dmax)]
-    fit = fit_power_law_beta(st.times, st.mean; tmin=tmin, tmax=tmax)
-    fit === nothing && continue
-    out[type] = merge(fit, (Dmax=Dmax,))
+  methods = sort(unique(df_lh.graph_type))
+  for method in methods
+    df_method = filter(row -> row.graph_type == method, df_lh)
+    isempty(df_method) && continue
+    Ds = sort(unique(df_method.initial_state_initial_maxdim))
+    isempty(Ds) && continue
+    Dmax = Ds[end]
+    Dmax = 128
+    df_dmax = filter(row -> row.initial_state_initial_maxdim == Dmax, df_method)
+    isempty(df_dmax) && continue
+
+    fits = NamedTuple[]
+    for row in eachrow(df_dmax)
+      fit = fit_power_law_beta(row.times, row.imbalance; tmin=tmin, tmax=tmax)
+      fit === nothing && continue
+      push!(fits, fit)
+    end
+    isempty(fits) && continue
+
+    betas = [f.beta for f in fits]
+    beta_mean = mean(betas)
+    beta_std = length(betas) > 1 ? std(betas; corrected=true) : fits[1].stderr
+    beta_se = length(betas) > 1 ? beta_std / sqrt(length(betas)) : fits[1].stderr
+
+    npts_vals = [f.npts for f in fits]
+    r2_vals = [f.r2 for f in fits]
+    A_vals = [f.A for f in fits]
+
+    finite_r2 = filter(isfinite, r2_vals)
+    r2_mean = isempty(finite_r2) ? NaN : mean(finite_r2)
+
+    out[method] = (
+      beta=beta_mean,
+      stderr=beta_se,
+      npts=round(Int, mean(npts_vals)),
+      r2=r2_mean,
+      A=mean(A_vals),
+      Dmax=Dmax,
+      nfits=length(fits),
+    )
   end
   return out
 end
@@ -644,76 +675,111 @@ end
 """
   plot_beta_vs_disorder(df; L_values, h_values, dir, tmin=5.0, tmax=50.0)
 
-For each method (`graph_type`), plot β versus disorder strength for multiple system sizes.
-Uses the highest available χ per method and the grid-averaged imbalance.
+For each method (`graph_type`), plot β versus disorder strength for the available system sizes.
+Uses the highest available χ per method and the grid-averaged imbalance; styling matches the
+publication theme and colors are sampled from the magma colormap.
 """
 function plot_beta_vs_disorder(
   df::DataFrame;
   L_values=[4, 6, 8, 10],
-  h_values=[0.0, 5.0, 10.0, 20.0, 30.0, 50.0],
+  h_values=[5.0, 10.0, 20.0, 30.0, 50.0],
   dir::String,
   tmin::Real=5.0,
   tmax::Real=50.0,
   xlim::Tuple{<:Real,<:Real}=(NaN, NaN),
   ylim::Tuple{<:Real,<:Real}=(0.0, 1.0),
 )
-  # Collect all methods from the filtered data
   df_sub = filter(row -> row.graph_L in L_values && row.model_h in h_values, df)
   methods = sort(unique(df_sub.graph_type))
   isempty(methods) && return
 
-  # Color map across L values for visual consistency
   Ls_sorted = sort(unique(L_values))
-  colors = wong_colors()
-  color_map = Dict{Int,Any}()
-  for (i, L) in enumerate(Ls_sorted)
-    color_map[L] = colors[(i-1)%length(colors)+1]
-  end
+  hs_sorted = sort(float.(h_values))
 
-  for method in methods
-    fig = Figure(fontsize=11pt, size=(10cm, 6cm))
+  low, high = 0.2, 0.85
+  nL = length(Ls_sorted)
+  color_fracs = nL == 1 ? [0.5] : [low + (high - low) * (i - 1) / (nL - 1) for i in 1:nL]
+  marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
+
+  for (method_idx, method) in enumerate(methods)
+    fig = Figure(size=multiplot_size(), fontsize=11pt, figure_padding=6)
     ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta", title="$(labels[method])")
-    # Apply fixed limits if provided
+
     xlo, xhi = xlim
     if isnan(xlo) || isnan(xhi)
-      xlo, xhi = minimum(h_values), maximum(h_values)
+      xlo, xhi = minimum(hs_sorted), maximum(hs_sorted)
     end
     xlims!(ax, xlo, xhi)
     ylims!(ax, first(ylim), last(ylim))
+    ax.xticks = WilkinsonTicks(6)
+    ax.yticks = WilkinsonTicks(6)
 
-    for L in Ls_sorted
+    for (iL, L) in enumerate(Ls_sorted)
       betas = Float64[]
       errs = Float64[]
       hs = Float64[]
-      for h in sort(h_values)
+      for h in hs_sorted
         vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax)
         haskey(vals, method) || continue
-        push!(hs, float(h))
+        push!(hs, h)
         push!(betas, vals[method].beta)
         push!(errs, vals[method].stderr)
       end
       isempty(hs) && continue
-      c = color_map[L]
-      label = "L=$L"
-      lines!(ax, hs, betas; color=c, label=label)
-      scatter!(ax, hs, betas; color=c, label=label)
-      # Optional uncertainty in β as vertical range bars (robust Makie recipe)
-      if !isempty(errs)
-        lows = betas .- errs
-        highs = betas .+ errs
-        rangebars!(ax, hs, lows, highs; color=c)
-      end
+
+      order = sortperm(hs)
+      hs_use = hs[order]
+      betas_use = betas[order]
+      errs_use = errs[order]
+
+      color = get(ColorSchemes.magma, color_fracs[iL])
+      marker = marker_shapes[(iL-1)%length(marker_shapes)+1]
+
+      # lines!(ax, hs_use, betas_use; color=color, linewidth=1.8, label="L=$L")
+      scatter!(ax, hs_use, max.(betas_use, 1e-4);
+        color=color,
+        marker=marker,
+        markersize=7,
+        strokecolor=:black,
+        label="L=$L",
+        strokewidth=0.5,
+      )
+
+      cutoff = 1e-4
+      yvals = max.(betas_use, cutoff)
+
+      lower = min.(errs_use, yvals .- cutoff * 0.9)
+      upper = errs_use
+      @show yvals
+      @show lower, upper
+
+
+      errorbars!(ax, hs_use, yvals, lower, upper;
+        direction=:y,
+        color=color,
+        linewidth=1.0,
+        whiskerwidth=6,
+      )
+
+      # if !isempty(errs_use)
+      #   errorbars!(ax, hs_use, max.(betas_use, 1e-4), errs_use;
+      #     direction=:y,
+      #     color=color,
+      #     linewidth=1.0,
+      #     whiskerwidth=6,
+      #   )
+      # end
     end
 
     try
-      axislegend(ax, position=:rt)
+      axislegend(ax; position=:rt, framevisible=false)
     catch
     end
+
     plots_dir = joinpath("plots", dir)
     mkpath(plots_dir)
-    fname = joinpath(plots_dir, "beta_vs_h_$(method)_tmin$(tmin)_tmax$(tmax).pdf")
+    fname = joinpath(plots_dir, @sprintf("beta_vs_h_%s_tmin%.1f_tmax%.1f.pdf", method, tmin, tmax))
     save(fname, fig)
-    # also PNG
     save(replace(fname, ".pdf" => ".png"), fig)
     println("Saved β vs h plot for method=$(method) to $(fname)")
   end
@@ -788,7 +854,9 @@ function plot_fit_vs_mean(
       for (i, method) in enumerate(methods)
         Ds_type = sort([D for (t, D) in keys(stats) if t == method])
         isempty(Ds_type) && continue
+        @show Ds_type
         Dmax = Ds_type[end]
+        Dmax = 64
         st = stats[(method, Dmax)]
 
         # Fit β and A on the specified window
@@ -1890,7 +1958,14 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   fig[1, 1] = Label(fig, "Error"; rotation=π / 2, tellheight=false)
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
-  colors = wong_colors()
+  palette = ColorSchemes.magma.colors
+  n_graph_types = max(length(graph_types), 1)
+  if n_graph_types == 1
+    colors = [palette[round(Int, length(palette) / 2)]]
+  else
+    palette_indices = range(10, length(palette) - 10; length=n_graph_types)
+    colors = [palette[clamp(round(Int, idx), 1, length(palette))] for idx in palette_indices]
+  end
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   axes = Axis[]
 
@@ -2044,10 +2119,22 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   # Plot with standard size to align with other figures/LaTeX
   fig = Figure(size=multiplot_size(), fontsize=11, figure_padding=6)
   grid = fig[1, 2] = GridLayout()
-  fig[1, 1] = Label(fig, "Error"; rotation=π / 2, tellheight=false)
+  if L == 4
+    fig[1, 1] = Label(fig, L"\langle |I_{\mathrm{ED}} - I_{\mathrm{TN}}| \rangle"; rotation=π / 2, tellheight=false)
+
+  else
+    fig[1, 1] = Label(fig, L"\langle |I_{\chi_{\mathrm{max}}} - I_{\chi}| \rangle"; rotation=π / 2, tellheight=false)
+  end
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
-  colors = wong_colors()
+  palette = ColorSchemes.magma.colors
+  n_graph_types = max(length(graph_types), 1)
+  if n_graph_types == 1
+    colors = [palette[round(Int, length(palette) / 2)]]
+  else
+    palette_indices = range(10, length(palette) - 10; length=n_graph_types)
+    colors = [palette[clamp(round(Int, idx), 1, length(palette))] for idx in palette_indices]
+  end
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   axes = Axis[]
 
@@ -2161,14 +2248,16 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
   fig[1, 1] = Label(fig, "Execution Time (s)"; rotation=π / 2, tellheight=false)
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
-  colors = wong_colors()
+  n_graph_types = max(length(graph_types), 1)
+  colors = [get(ColorSchemes.batlow, i) for i in range(0, 1; length=n_graph_types)]
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   axes = Axis[]
 
   for (h_idx, h) in enumerate(h_values)
-    ax = Axis(grid[1, h_idx];
+    ax = Axis(
+      grid[1, h_idx];
       # xscale=log10,
-      yscale=log10,
+      # yscale=log10,
     )
     push!(axes, ax)
 
@@ -2225,10 +2314,7 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
       end
     end
 
-    if h_idx == 1
-      axislegend(ax; position=:rt, orientation=:vertical,
-        nbanks=1, framevisible=false)
-    end
+    Legend(fig[1, 3], ax)
   end
 
   colgap!(fig.layout, 4.0)

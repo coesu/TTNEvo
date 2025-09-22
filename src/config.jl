@@ -4,6 +4,7 @@ using ITensors
 
 L = [8]
 h = [20.0]
+h = 5:5:40
 
 time_step = [0.1]
 total_time = [10.0]
@@ -14,7 +15,7 @@ maxdim = [32]
 cutoff = [1e-12]
 nsite = [1]
 qns = [false]
-grid_number = collect(1:1)
+grid_number = collect(1:100)
 
 init_state = [:columnar_neel]
 initial_maxdim = [2]
@@ -24,9 +25,9 @@ observe_every = [1]
 save_path_training = "data/train"
 
 tree_pre_det = false
-tree_opt = false
-snake = true
-hilbert = true
+tree_opt = true
+snake = false
+hilbert = false
 hierachical = false
 
 parameter_sets = []
@@ -57,7 +58,7 @@ for Li in L,
     push!(parameter_sets, TreeConfig(
       TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
       InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
-      "L$Li-column-tree-new",
+      "L$Li-column-tree-beta",
       HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
       FreeGraph(L=Li, gridnum=grid_numberi, with_ancilla=false, full_interaction=true, optimize_structure=true, optimize_bonddim=true, save_tree=true),
       Observer()

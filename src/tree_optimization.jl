@@ -87,13 +87,13 @@ function tree_optimization_sweep_free(ψ, os, N=nv(ψ) * 2; maxdim=Inf, save_pat
       current_partition_a_indices = findall(in(current_partition_a), li)
       structure_unchanged = Set(min_bi[1]) == Set(current_partition_a_indices)
       @show structure_unchanged
-      if !isnothing(save_path)
-        @show save_path
-        println("saving data")
-        save_training_data_simple(
-          ψ, current, li, bipartitions, min_idx, disorder, save_path, bipartition_svs, structure_unchanged
-        )
-      end
+      # if !isnothing(save_path)
+      #   @show save_path
+      #   println("saving data")
+      #   save_training_data_simple(
+      #     ψ, current, li, bipartitions, min_idx, disorder, save_path, bipartition_svs, structure_unchanged
+      #   )
+      # end
       if !structure_unchanged
         remove_edges_local!(ψ, region(current))
         ψ[src(current)] = min_u
