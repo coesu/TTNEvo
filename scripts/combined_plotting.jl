@@ -11,6 +11,8 @@ using JLD2
 using Base.Threads
 using Dates
 using DataFrames
+using LsqFit
+using Roots
 using NetworkLayout
 using ColorSchemes
 
@@ -622,7 +624,7 @@ For fixed (L, h), take the highest available χ per `graph_type`, fit β for eac
 simulation on [tmin, tmax], and then average the fitted parameters. Returns a Dict keyed by
 `graph_type::String` with values `(beta, stderr, npts, r2, A, Dmax, nfits)`.
 """
-function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tmax::Real=50.0)
+function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tmax::Real=50.0, Dmax=nothing)
   df_lh = filter(row -> row.graph_L == L && row.model_h == h, df)
   isempty(df_lh) && return Dict{String,NamedTuple}()
   df_lh = filter(row -> !isempty(row.times), df_lh)
@@ -634,8 +636,9 @@ function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tm
     isempty(df_method) && continue
     Ds = sort(unique(df_method.initial_state_initial_maxdim))
     isempty(Ds) && continue
-    Dmax = Ds[end]
-    Dmax = 128
+    if isnothing(Dmax)
+      Dmax = Ds[end]
+    end
     df_dmax = filter(row -> row.initial_state_initial_maxdim == Dmax, df_method)
     isempty(df_dmax) && continue
 
@@ -682,10 +685,10 @@ publication theme and colors are sampled from the magma colormap.
 function plot_beta_vs_disorder(
   df::DataFrame;
   L_values=[4, 6, 8, 10],
-  h_values=[5.0, 10.0, 20.0, 30.0, 50.0],
+  h_values=[2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
   dir::String,
-  tmin::Real=5.0,
-  tmax::Real=50.0,
+  tmin::Real=50.0,
+  tmax::Real=100.0,
   xlim::Tuple{<:Real,<:Real}=(NaN, NaN),
   ylim::Tuple{<:Real,<:Real}=(0.0, 1.0),
 )
@@ -702,8 +705,8 @@ function plot_beta_vs_disorder(
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
 
   for (method_idx, method) in enumerate(methods)
-    fig = Figure(size=multiplot_size(), fontsize=11pt, figure_padding=6)
-    ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta", title="$(labels[method])")
+    fig = Figure(size=(500, 300), fontsize=12pt)
+    ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta")
 
     xlo, xhi = xlim
     if isnan(xlo) || isnan(xhi)
@@ -711,8 +714,6 @@ function plot_beta_vs_disorder(
     end
     xlims!(ax, xlo, xhi)
     ylims!(ax, first(ylim), last(ylim))
-    ax.xticks = WilkinsonTicks(6)
-    ax.yticks = WilkinsonTicks(6)
 
     for (iL, L) in enumerate(Ls_sorted)
       betas = Float64[]
@@ -735,8 +736,14 @@ function plot_beta_vs_disorder(
       color = get(ColorSchemes.magma, color_fracs[iL])
       marker = marker_shapes[(iL-1)%length(marker_shapes)+1]
 
+
+      # small horizontal offset for each method
+      offset = 0.1 * (iL - (length(Ls_sorted) + 1) / 2)
+
+      hs_use_shifted = hs_use .+ offset
+
       # lines!(ax, hs_use, betas_use; color=color, linewidth=1.8, label="L=$L")
-      scatter!(ax, hs_use, max.(betas_use, 1e-4);
+      scatter!(ax, hs_use_shifted, betas_use;
         color=color,
         marker=marker,
         markersize=7,
@@ -746,20 +753,21 @@ function plot_beta_vs_disorder(
       )
 
       cutoff = 1e-4
-      yvals = max.(betas_use, cutoff)
+      yvals = betas_use
 
-      lower = min.(errs_use, yvals .- cutoff * 0.9)
+      lower = errs_use
       upper = errs_use
       @show yvals
       @show lower, upper
 
 
-      errorbars!(ax, hs_use, yvals, lower, upper;
+      errorbars!(ax, hs_use_shifted, yvals, lower, upper;
         direction=:y,
         color=color,
         linewidth=1.0,
         whiskerwidth=6,
       )
+      hlines!(ax, [0.0]; color=:black, linewidth=1.0, linestyle=:dash)
 
       # if !isempty(errs_use)
       #   errorbars!(ax, hs_use, max.(betas_use, 1e-4), errs_use;
@@ -783,6 +791,267 @@ function plot_beta_vs_disorder(
     save(replace(fname, ".pdf" => ".png"), fig)
     println("Saved β vs h plot for method=$(method) to $(fname)")
   end
+end
+
+# --- Shared model (p = [p1, p2, p3, p4]) ---
+model(x, p) = @. p[1] * exp(-p[2] * x) - p[3] * x + p[4]
+
+# --- Fit + hc + σ_hc ---
+function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVector, beta_crit=0.01)
+  p0 = [1.0, 0.01, 0.0, 0.0]
+
+  # weights as positional arg BEFORE p0
+  fit = curve_fit(model, h, beta, 1.0 ./ (err .^ 2), p0)
+  p̂ = coef(fit)
+  cov = estimate_covar(fit)
+
+  # Root of f(x) = model(x,p̂) - beta_crit
+  f̂(x) = model(x, p̂) - beta_crit
+  hc = find_zero(f̂, 0.0)
+
+  # Hand-derived derivatives for uncertainty
+  exp_term = exp(-p̂[2] * hc)
+  dfdx = -p̂[1] * p̂[2] * exp_term - p̂[3]
+  df_dp = [exp_term,
+    -p̂[1] * hc * exp_term,
+    -hc,
+    1.0]
+  J = -df_dp / dfdx
+  σ_hc = sqrt(J' * cov * J)
+
+  return hc, σ_hc, p̂
+end
+
+# --- Main: compute (h,β,σ) per L, fit, and plot everything on one figure ---
+function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractString="FreeGraph", beta_crit=0.01, Dmax=nothing)
+  L_vals = [4, 6, 8]
+
+  beta_fig = Figure(size=(500, 300), fontsize=9)
+  ax_beta = Axis(beta_fig[1, 1],
+    xlabel="h",
+    ylabel="β",
+  )
+
+  hlines!(ax_beta, [0.0], color=:gray, linestyle=:dash, label="β = $(beta_crit)")
+
+  results = Dict{Int,NamedTuple}()
+  palette = CairoMakie.Makie.wong_colors()
+
+  label_assigned = false
+  for (i, L) in enumerate(L_vals)
+    color = palette[1+(i-1)%length(palette)]
+
+    betas, errs, hs = Float64[], Float64[], Float64[]
+    h_vals = sort(unique(df[df.graph_L.==L, :].model_h))
+    for h in h_vals
+      vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
+      haskey(vals, method) || continue
+      push!(hs, h)
+      push!(betas, vals[method].beta)
+      push!(errs, vals[method].stderr)
+    end
+
+    isempty(hs) && continue
+    h = collect(hs)[2:end]
+    beta = collect(betas)[2:end]
+    err = collect(errs)[2:end]
+
+    hc, σ_hc, p̂ = calculate_hc(h, beta, err, beta_crit)
+    results[L] = (h=h, beta=beta, err=err, hc=hc, σ_hc=σ_hc, p̂=p̂)
+
+    errorbars!(ax_beta, h, beta, err;
+      color=color,
+      whiskerwidth=10,
+    )
+    scatter!(ax_beta, h, beta; color=color, markersize=7, label=L"L=%$L")
+
+    hgrid = range(minimum(h), maximum(h), length=300)
+    lines!(ax_beta, hgrid, model(hgrid, p̂); color=color, linewidth=2)
+
+    vlines!(ax_beta, [hc]; color=color, linestyle=:dot, linewidth=2)
+    vspan!(ax_beta, hc - σ_hc, hc + σ_hc; color=(color, 0.18))
+  end
+
+  axislegend(ax_beta, position=:rb)
+
+  hc_fig = Figure(size=(500, 300), fontsize=12pt)
+  ax_hc = Axis(hc_fig[1, 1],
+    xlabel=L"L",
+    ylabel=L"h_c",
+  )
+
+  if !isempty(results)
+    L_sorted = sort(collect(keys(results)))
+    hc_vals = [results[L].hc for L in L_sorted]
+    σhc_vals = [results[L].σ_hc for L in L_sorted]
+
+    errorbars!(ax_hc, L_sorted, hc_vals, σhc_vals;
+      color=:black,
+      whiskerwidth=10,
+      label=L"\chi=128"
+    )
+    scatter!(ax_hc, L_sorted, hc_vals; color=:black, markersize=8)
+    ll = 2:0.01:10
+    lines!(ax_hc, ll, avalanche_critical_disorder.(ll); label="Analytical")
+
+    axislegend(ax_hc)
+  end
+
+  plots_dir = joinpath("plots", "beta")
+  mkpath(plots_dir)
+
+  beta_fname = joinpath(plots_dir, "beta_vs_h_with_fit.pdf")
+  save(beta_fname, beta_fig)
+  save(replace(beta_fname, ".pdf" => ".png"), beta_fig)
+  println("Saved β(h) plot to $(beta_fname)")
+
+  hc_fname = joinpath(plots_dir, "hc_vs_L.pdf")
+  save(hc_fname, hc_fig)
+  save(replace(hc_fname, ".pdf" => ".png"), hc_fig)
+  println("Saved h_c vs L plot to $(hc_fname)")
+
+  return ax_hc
+end
+
+function get_beta_values!(ax_beta, ax_hc, df;
+  tmin=50.0,
+  tmax=100.0,
+  method="FreeGraph",
+  beta_crit=0.01,
+  Dmax::Union{Nothing,Int}=nothing,
+  color=nothing,
+  marker=nothing,
+)
+  L_vals = [4, 6, 8]
+  results = Dict{Int,NamedTuple}()
+  linestyles = (:solid, :dash, :dot, :dashdot)
+  palette = CairoMakie.Makie.wong_colors()
+  default_markers = (:circle, :rect, :diamond)
+  label_assigned = false
+
+  for (i, L) in enumerate(L_vals)
+    betas, errs, hs = Float64[], Float64[], Float64[]
+    h_vals = sort(unique(df[df.graph_L.==L, :].model_h))
+    for h in h_vals
+      vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
+      haskey(vals, method) || continue
+      push!(hs, h)
+      push!(betas, vals[method].beta)
+      push!(errs, vals[method].stderr)
+    end
+    if length(hs) <= 1
+      continue
+    end
+
+    h = collect(hs)[2:end]
+    beta = collect(betas)[2:end]
+    err = collect(errs)[2:end]
+    hc, σ_hc, p̂ = calculate_hc(h, beta, err, beta_crit)
+    results[L] = (h=h, beta=beta, err=err, hc=hc, σ_hc=σ_hc, p̂=p̂)
+
+    linestyle = linestyles[1+(i-1)%length(linestyles)]
+    local_color = isnothing(color) ? palette[1+(i-1)%length(palette)] : color
+    local_marker = isnothing(marker) ? default_markers[1+(i-1)%length(default_markers)] : marker
+    legend_label = if isnothing(color)
+      L"Dmax=%$Dmax, L=%$L"
+    elseif label_assigned
+      nothing
+    else
+      "Dmax=$(Dmax)"
+    end
+
+    errorbars!(ax_beta, h, beta, err;
+      color=local_color,
+      whiskerwidth=10,
+    )
+    scatter!(ax_beta, h, beta;
+      color=local_color,
+      marker=local_marker,
+      label=legend_label,
+    )
+    hgrid = range(minimum(h), maximum(h), length=300)
+    lines!(ax_beta, hgrid, model(hgrid, p̂);
+      color=local_color,
+      linestyle=linestyle,
+      linewidth=2,
+    )
+    vlines!(ax_beta, [hc]; color=local_color, linestyle=:dot)
+    if !isnothing(color) && legend_label !== nothing
+      label_assigned = true
+    end
+  end
+
+  if !isempty(results)
+    L_sorted = sort(collect(keys(results)))
+    hc_vals = [results[L].hc for L in L_sorted]
+    σhc_vals = [results[L].σ_hc for L in L_sorted]
+
+    hc_color = isnothing(color) ? :black : color
+    hc_marker = isnothing(marker) ? :circle : marker
+    errorbars!(ax_hc, L_sorted, hc_vals, σhc_vals;
+      color=hc_color,
+      whiskerwidth=10,
+    )
+    scatter!(ax_hc, L_sorted, hc_vals;
+      color=hc_color,
+      marker=hc_marker,
+      label="Dmax=$(Dmax)",
+    )
+  end
+end
+
+function beta_combined_plot(df)
+  beta_fig = Figure(size=(600, 400))
+  ax_beta = Axis(beta_fig[1, 1], xlabel="h", ylabel="β")
+  beta_crit = 0.01
+  hlines!(ax_beta, [beta_crit]; color=:gray, linestyle=:dash)
+
+  hc_fig = Figure(size=(600, 400))
+  ax_hc = Axis(hc_fig[1, 1], xlabel="L", ylabel="h_c")
+
+  palette = CairoMakie.Makie.wong_colors()
+  markers = (:circle, :rect, :diamond, :utriangle, :dtriangle)
+  D_values = [32, 64, 128, 196]
+
+  for (i, D) in enumerate(D_values)
+    color = palette[1+(i-1)%length(palette)]
+    marker = markers[1+(i-1)%length(markers)]
+    get_beta_values!(ax_beta, ax_hc, df;
+      Dmax=D,
+      beta_crit=beta_crit,
+      color=color,
+      marker=marker,
+    )
+  end
+
+  ll = LinRange(2, 10, 400)
+  lines!(ax_hc, ll, avalanche_critical_disorder.(ll);
+    color=:black,
+    linestyle=:dash,
+    label="Analytical",
+  )
+
+  axislegend(ax_beta, position=:rb)
+  axislegend(ax_hc, position=:rb)
+
+  plots_dir = joinpath("plots", "beta")
+  mkpath(plots_dir)
+
+  beta_fname = joinpath(plots_dir, "beta_vs_h_comparison.pdf")
+  save(beta_fname, beta_fig)
+  save(replace(beta_fname, ".pdf" => ".png"), beta_fig)
+  println("Saved β(h) comparison to $(beta_fname)")
+
+  hc_fname = joinpath(plots_dir, "hc_vs_L_comparison.pdf")
+  save(hc_fname, hc_fig)
+  save(replace(hc_fname, ".pdf" => ".png"), hc_fig)
+  println("Saved h_c(L) comparison to $(hc_fname)")
+
+  return (beta_fig=beta_fig, hc_fig=hc_fig)
+end
+
+function avalanche_critical_disorder(L, c1=1.57)
+  return exp(c1 * log(L^2)^(1 / 3))
 end
 
 """
