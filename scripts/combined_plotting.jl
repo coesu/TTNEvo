@@ -824,7 +824,7 @@ end
 
 # --- Main: compute (h,β,σ) per L, fit, and plot everything on one figure ---
 function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractString="FreeGraph", beta_crit=0.01, Dmax=nothing)
-  L_vals = [4, 6, 8]
+  L_vals = [4, 6, 8, 10]
 
   beta_fig = Figure(size=(500, 300), fontsize=9)
   ax_beta = Axis(beta_fig[1, 1],
@@ -917,12 +917,12 @@ function get_beta_values!(ax_beta, ax_hc, df;
   tmin=50.0,
   tmax=100.0,
   method="FreeGraph",
-  beta_crit=0.01,
+  beta_crit=0.001,
   Dmax::Union{Nothing,Int}=nothing,
   color=nothing,
   marker=nothing,
+  L_vals=[4, 6, 8, 10]
 )
-  L_vals = [4, 6, 8]
   results = Dict{Int,NamedTuple}()
   linestyles = (:solid, :dash, :dot, :dashdot)
   palette = CairoMakie.Makie.wong_colors()
@@ -953,7 +953,7 @@ function get_beta_values!(ax_beta, ax_hc, df;
     local_color = isnothing(color) ? palette[1+(i-1)%length(palette)] : color
     local_marker = isnothing(marker) ? default_markers[1+(i-1)%length(default_markers)] : marker
     legend_label = if isnothing(color)
-      L"Dmax=%$Dmax, L=%$L"
+      L"L=%$L"
     elseif label_assigned
       nothing
     else
@@ -1003,7 +1003,7 @@ end
 function beta_combined_plot(df)
   beta_fig = Figure(size=(600, 400))
   ax_beta = Axis(beta_fig[1, 1], xlabel="h", ylabel="β")
-  beta_crit = 0.01
+  beta_crit = 0.005
   hlines!(ax_beta, [beta_crit]; color=:gray, linestyle=:dash)
 
   hc_fig = Figure(size=(600, 400))
@@ -1019,7 +1019,7 @@ function beta_combined_plot(df)
     get_beta_values!(ax_beta, ax_hc, df;
       Dmax=D,
       beta_crit=beta_crit,
-      color=color,
+      # color=color,
       marker=marker,
     )
   end
@@ -1041,10 +1041,12 @@ function beta_combined_plot(df)
   save(beta_fname, beta_fig)
   save(replace(beta_fname, ".pdf" => ".png"), beta_fig)
   println("Saved β(h) comparison to $(beta_fname)")
+  display(beta_fig)
 
   hc_fname = joinpath(plots_dir, "hc_vs_L_comparison.pdf")
   save(hc_fname, hc_fig)
   save(replace(hc_fname, ".pdf" => ".png"), hc_fig)
+  display(hc_fig)
   println("Saved h_c(L) comparison to $(hc_fname)")
 
   return (beta_fig=beta_fig, hc_fig=hc_fig)
