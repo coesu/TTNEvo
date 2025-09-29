@@ -16,6 +16,24 @@ using Roots
 using NetworkLayout
 using ColorSchemes
 
+default_colorscheme() = ColorSchemes.Zissou1
+
+function set_default_colorscheme!(scheme)
+  return scheme
+end
+
+scheme_color(fraction) = get(default_colorscheme(), clamp(fraction, 0.0, 1.0))
+
+function scheme_colors(n::Integer; low::Float64=0.15, high::Float64=0.85)
+  cs = default_colorscheme()
+  empty_palette = similar(cs.colors, 0)
+  n <= 0 && return empty_palette
+  low == high && return fill(get(cs, clamp(low, 0.0, 1.0)), n)
+  n == 1 && return [get(cs, clamp((low + high) / 2, 0.0, 1.0))]
+  step = (high - low) / max(n - 1, 1)
+  return [get(cs, clamp(low + step * (i - 1), 0.0, 1.0)) for i in 1:n]
+end
+
 """
     logticks1(kmin::Int, kmax::Int)
 
@@ -279,8 +297,10 @@ function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}
 
   linkxaxes!(ax, ax_md, ax_rt)
 
+  series_colors = scheme_colors(3)
+
   if !isempty(T)
-    lines!(ax, T, D; color=:steelblue, label="ED − TN")
+    lines!(ax, T, D; color=series_colors[1], label="ED − TN")
     ax.yticks = ([1e-2, 1e-5, 1e-8, 1e-11], [L"10^{-2}", L"10^{-5}", L"10^{-8}", L"10^{-11}"])
   else
     @warn "No common time grid with ED found; cannot plot ED − TN differences."
@@ -288,14 +308,14 @@ function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}
 
   if !isempty(t_md)
     order = sortperm(t_md)
-    lines!(ax_md, t_md[order], d_md[order]; color=:forestgreen)
+    lines!(ax_md, t_md[order], d_md[order]; color=series_colors[2])
     ax_md.yticks = ([32, 64, 128], ["32", "64", "128"])
   else
     @warn "No bond-dimension data available for plotting."
   end
 
   if !isempty(rt_times)
-    lines!(ax_rt, rt_times, rt_vals; color=:darkorange)
+    lines!(ax_rt, rt_times, rt_vals; color=series_colors[3])
     kmin = floor(Int, log10(minimum(rt_vals)))
     kmax = ceil(Int, log10(maximum(rt_vals)))
     ax_rt.yticks = logticks1(kmin, kmax)
@@ -413,9 +433,8 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
 
   all_rt_vals = Float64[]
 
-  # Use magma colormap for consistency with other plots
   ncurves = length(sim_dirs)
-  colors = [get(ColorSchemes.magma, (i - 0.5) / max(ncurves, 1)) for i in 1:ncurves]
+  colors = scheme_colors(ncurves)
 
   for (i, dir) in enumerate(sim_dirs)
     file = _pick_file(dir)
@@ -680,7 +699,7 @@ end
 
 For each method (`graph_type`), plot β versus disorder strength for the available system sizes.
 Uses the highest available χ per method and the grid-averaged imbalance; styling matches the
-publication theme and colors are sampled from the magma colormap.
+publication theme and draws hues from the default colormap.
 """
 function plot_beta_vs_disorder(
   df::DataFrame;
@@ -733,7 +752,7 @@ function plot_beta_vs_disorder(
       betas_use = betas[order]
       errs_use = errs[order]
 
-      color = get(ColorSchemes.magma, color_fracs[iL])
+      color = scheme_color(color_fracs[iL])
       marker = marker_shapes[(iL-1)%length(marker_shapes)+1]
 
 
@@ -824,7 +843,7 @@ end
 
 # --- Main: compute (h,β,σ) per L, fit, and plot everything on one figure ---
 function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractString="FreeGraph", beta_crit=0.01, Dmax=nothing)
-  L_vals = [4, 6, 8, 10]
+  L_vals = [4, 6, 8]
 
   beta_fig = Figure(size=(500, 300), fontsize=9)
   ax_beta = Axis(beta_fig[1, 1],
@@ -835,7 +854,7 @@ function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractS
   hlines!(ax_beta, [0.0], color=:gray, linestyle=:dash, label="β = $(beta_crit)")
 
   results = Dict{Int,NamedTuple}()
-  palette = CairoMakie.Makie.wong_colors()
+  palette = default_colorscheme().colors
 
   label_assigned = false
   for (i, L) in enumerate(L_vals)
@@ -892,7 +911,7 @@ function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractS
     )
     scatter!(ax_hc, L_sorted, hc_vals; color=:black, markersize=8)
     ll = 2:0.01:10
-    lines!(ax_hc, ll, avalanche_critical_disorder.(ll); label="Analytical")
+    # lines!(ax_hc, ll, avalanche_critical_disorder.(ll); label="Analytical")
 
     axislegend(ax_hc)
   end
@@ -921,7 +940,7 @@ function get_beta_values!(ax_beta, ax_hc, df;
   Dmax::Union{Nothing,Int}=nothing,
   color=nothing,
   marker=nothing,
-  L_vals=[4, 6, 8, 10]
+  L_vals=[4, 6, 8]
 )
   results = Dict{Int,NamedTuple}()
   linestyles = (:solid, :dash, :dot, :dashdot)
@@ -957,7 +976,7 @@ function get_beta_values!(ax_beta, ax_hc, df;
     elseif label_assigned
       nothing
     else
-      "Dmax=$(Dmax)"
+      "test"
     end
 
     errorbars!(ax_beta, h, beta, err;
@@ -995,23 +1014,23 @@ function get_beta_values!(ax_beta, ax_hc, df;
     scatter!(ax_hc, L_sorted, hc_vals;
       color=hc_color,
       marker=hc_marker,
-      label="Dmax=$(Dmax)",
     )
   end
 end
 
 function beta_combined_plot(df)
-  beta_fig = Figure(size=(600, 400))
+  beta_fig = Figure(size=multiplot_size())
   ax_beta = Axis(beta_fig[1, 1], xlabel="h", ylabel="β")
-  beta_crit = 0.005
+  beta_crit = 0.01
   hlines!(ax_beta, [beta_crit]; color=:gray, linestyle=:dash)
 
-  hc_fig = Figure(size=(600, 400))
-  ax_hc = Axis(hc_fig[1, 1], xlabel="L", ylabel="h_c")
+  hc_fig = Figure(size=(500, 300), fontsize=12pt)
+  # hc_fig = Figure(size=(500, 300))
+  ax_hc = Axis(hc_fig[1, 1], xlabel=L"L", ylabel=L"h_c")
 
   palette = CairoMakie.Makie.wong_colors()
   markers = (:circle, :rect, :diamond, :utriangle, :dtriangle)
-  D_values = [32, 64, 128, 196]
+  D_values = [128]
 
   for (i, D) in enumerate(D_values)
     color = palette[1+(i-1)%length(palette)]
@@ -1019,20 +1038,23 @@ function beta_combined_plot(df)
     get_beta_values!(ax_beta, ax_hc, df;
       Dmax=D,
       beta_crit=beta_crit,
+      # method="SnakeGraph",
       # color=color,
+      L_vals=[4, 6, 8],
       marker=marker,
     )
   end
 
-  ll = LinRange(2, 10, 400)
-  lines!(ax_hc, ll, avalanche_critical_disorder.(ll);
-    color=:black,
-    linestyle=:dash,
-    label="Analytical",
-  )
+  ll = LinRange(4, 10, 400)
+  norm = 50 / avalanche_critical_disorder(8)
+  # lines!(ax_hc, ll, norm * avalanche_critical_disorder.(ll);
+  #   color=:black,
+  #   linestyle=:dash,
+  #   label="Avalanche",
+  # )
 
-  axislegend(ax_beta, position=:rb)
-  axislegend(ax_hc, position=:rb)
+  # axislegend(ax_beta, position=:rb)
+  # axislegend(ax_hc, position=:rb)
 
   plots_dir = joinpath("plots", "beta")
   mkpath(plots_dir)
@@ -1087,7 +1109,7 @@ function plot_fit_vs_mean(
       methods = sort(unique(first.(keys(stats))))
       isempty(methods) && continue
 
-      # Colors per method using magma mid-range for readability
+      # Colors per method using the default colormap mid-range for readability
       n_types = length(methods)
       low, high = 0.2, 0.8
       fracs = if n_types == 1
@@ -1098,7 +1120,7 @@ function plot_fit_vs_mean(
         [low + (high - low) * (j - 1) / (n_types - 1) for j in 1:n_types]
       end
 
-      fig = Figure(fontsize=11pt, size=(12cm, 7cm))
+      fig = Figure(fontsize=11pt, size=multiplot_size())
       ax = Axis(fig[1, 1], xlabel=L"t", ylabel="Averaged imbalance")
       # Apply fixed limits and scales; ensure positive if a log scale is used
       xlo, xhi = xlim
@@ -1140,7 +1162,7 @@ function plot_fit_vs_mean(
         tf = st.times[idxf]
         yfit = fit.A .* (tf .^ (-fit.beta))
 
-        color = get(ColorSchemes.magma, fracs[i])
+        color = scheme_color(fracs[i])
         label_mean = "$(labels[method]), D=$(Dmax) mean"
         label_fit = @sprintf("%s fit (β=%.3f)", labels[method], fit.beta)
 
@@ -1186,6 +1208,138 @@ function plot_fit_vs_mean(
     end
   end
 end
+
+
+
+function multiplot_fit_vs_mean(
+  df::DataFrame;
+  L::Int=8,
+  h_values=[5.0, 10.0, 20.0, 30.0, 50.0],
+  dir::String,
+  tmin::Real=50.0,
+  tmax::Real=100.0,
+  xlog::Bool=false,
+  ylog::Bool=false,
+  xlim::Tuple{<:Real,<:Real}=(1e-1, 100.0),
+  ylim::Tuple{<:Real,<:Real}=(1e-4, 1.0),
+  Dmax=128,
+)
+  fig = Figure(fontsize=11, size=(500, 150 * length(h_values)))
+  axes = Axis[]  # collect axes so we can link them later
+
+  for (i, h) in enumerate(h_values)
+    @show h
+    df_lh = filter(row -> row.graph_L == L && row.model_h == h && !isempty(row.times), df)
+    isempty(df_lh) && continue
+
+    stats = compute_mean_imbalance_stats(df_lh)
+    isempty(stats) && continue
+
+    # keep only "FreeGraph"
+    methods = filter(m -> m == "FreeGraph", unique(first.(keys(stats))))
+    isempty(methods) && continue
+
+    ax = Axis(fig[i, 1], xlabel=L"t", ylabel="⟨I⟩")
+    push!(axes, ax)
+
+    # label h in bottom-left corner
+    text!(ax, 0.05, 0.95,
+      text="h = $h",
+      align=(:left, :top),
+      space=:relative,
+      fontsize=12,
+      color=:black,
+    )
+
+    # Axis scaling
+    xlo, xhi = xlim
+    ylo, yhi = ylim
+    if xlog
+      # xlo = max(eps(), xlo)
+      # xhi = max(xhi, xlo * 10)
+      xlims!(ax, xlo, xhi)
+      ax.xscale = log10
+    end
+    if ylog
+      ylo = max(eps(), ylo)
+      yhi = max(yhi, ylo * 10)
+      ax.yscale = log10
+    end
+    xlims!(ax, xlo, xhi)
+    # ylims!(ax, ylo, yhi)
+
+    vlines!(ax, [tmin, tmax]; color=:gray, linestyle=:dot)
+
+    for method in methods
+      Ds_type = sort([D for (t, D) in keys(stats) if t == method])
+      isempty(Ds_type) && continue
+      st = stats[(method, Dmax)]
+
+      fit = fit_power_law_beta(st.times, st.mean; tmin=tmin, tmax=tmax)
+      fit === nothing && continue
+
+      idxf = findall(t -> t >= tmin && t <= tmax, st.times)
+      isempty(idxf) && continue
+      tf = st.times[idxf]
+      yfit = fit.A .* (tf .^ (-fit.beta))
+
+      color_mean = :dodgerblue
+      color_fit = :red   # different color for the fit
+
+      label_mean = "TTN"
+
+      mask = trues(length(st.times))
+      if xlog
+        mask .&= st.times .> 0
+      end
+      if ylog
+        mask .&= st.mean .> 0
+      end
+      if any(mask)
+        tp = st.times[mask]
+        mp = st.mean[mask]
+        sp = st.stderr[mask]
+        lines!(ax, tp, mp; color=color_mean, linewidth=2, label=label_mean)
+        if ylog
+          lower = max.(mp .- sp, 1e-12)
+          upper = max.(mp .+ sp, 1e-12)
+          band!(ax, tp, lower, upper; color=(color_mean, 0.25))
+        else
+          band!(ax, tp, mp .- sp, mp .+ sp; color=(color_mean, 0.25))
+        end
+      end
+
+      # fit in a different color and dashed style
+      lines!(ax, tf, yfit; color=color_fit, linestyle=:dash, linewidth=2, label="Fit")
+
+      # add β value in top-right corner of plot
+      text!(ax, 0.95, 0.95,
+        text=@sprintf("β = %.3f", fit.beta),
+        align=(:right, :top),
+        space=:relative,
+        fontsize=12,
+        color=:black,
+      )
+    end
+
+    if i == 1
+      axislegend(ax, position=:rb)
+    end
+  end
+
+  # Link all x-axes
+  if !isempty(axes)
+    linkxaxes!(axes...)
+  end
+
+  plots_dir = joinpath("plots", dir)
+  mkpath(plots_dir)
+  fname = joinpath(plots_dir, @sprintf("multiplot_fit_vs_mean_L%d.pdf", L))
+  save(fname, fig)
+  save(replace(fname, ".pdf" => ".png"), fig)
+  println("Saved multiplot fit-vs-mean to $(fname)")
+end
+
 
 """
   compute_ed_error_and_rows(df_current, L, h)
@@ -2084,8 +2238,7 @@ function plot_accuracy_vs_parameters(df::DataFrame; L::Int, dir)
     # put legend only once
     if h_idx == 1
       try
-        axislegend(ax; position=:rt, orientation=:vertical,
-          nbanks=1, framevisible=false, fontsize=8.0)
+        axislegend(ax; position=:rt, orientation=:vertical, framevisible=false)
       catch
       end
     end
@@ -2229,7 +2382,7 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   fig[1, 1] = Label(fig, "Error"; rotation=π / 2, tellheight=false)
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
-  palette = ColorSchemes.magma.colors
+  palette = default_colorscheme().colors
   n_graph_types = max(length(graph_types), 1)
   if n_graph_types == 1
     colors = [palette[round(Int, length(palette) / 2)]]
@@ -2261,7 +2414,7 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
       marker = marker_shapes[(s.type_idx-1)%length(marker_shapes)+1]
       scatter!(ax, s.params, s.errors;
         color=s.runtimes,
-        colormap=:magma,
+        colormap=default_colorscheme(),
         colorscale=log10,
         colorrange=(global_rt_min + 1e-16, global_rt_max + 1e-16),
         marker=marker,
@@ -2271,7 +2424,7 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
     end
 
     if h_idx == 1
-      axislegend(ax; position=:rt, orientation=:vertical, nbanks=1, framevisible=false)
+      axislegend(ax; position=:rt, orientation=:vertical, framevisible=false)
     end
   end
 
@@ -2282,7 +2435,7 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   cb_labels = ["10^$(e)" for e in cb_exp_min:cb_exp_max]
 
   Colorbar(fig[1, 3],
-    colormap=:viridis,
+    colormap=default_colorscheme(),
     limits=(global_rt_min + 1e-16, global_rt_max + 1e-16),
     label="Execution Time (s)",
     scale=log10,
@@ -2398,7 +2551,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   end
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
-  palette = ColorSchemes.magma.colors
+  palette = default_colorscheme().colors
   n_graph_types = max(length(graph_types), 1)
   if n_graph_types == 1
     colors = [palette[round(Int, length(palette) / 2)]]
@@ -2447,7 +2600,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
       )
       scatter!(ax, s.params, s.errors;
         color=s.runtimes,
-        colormap=:magma,
+        colormap=default_colorscheme(),
         colorrange=(global_rt_min + 1e-16, global_rt_max + 1e-16),
         colorscale=log10,
         marker=marker,
@@ -2473,7 +2626,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   cb2_labels = [L"10^%$(e)" for e in cb2_exp_min:cb2_exp_max]
 
   Colorbar(fig[1, 3],
-    colormap=:magma,
+    colormap=default_colorscheme(),
     scale=log10,
     limits=(10.0^cb2_exp_min, 10.0^cb2_exp_max),
     label="Execution Time (s)",
@@ -2511,7 +2664,7 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
     return
   end
 
-  fig = Figure(size=multiplot_size(), fontsize=11)
+  fig = Figure(size=multiplot_size(), fontsize=8pt)
 
   # Outer layout: col 1 = shared ylabel, col 2 = plots grid
   scaling = 1e5
@@ -2520,7 +2673,7 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
   fig[2, 2] = Label(fig, L"\text{Number of Parameters} / 10^5"; tellwidth=false)
 
   n_graph_types = max(length(graph_types), 1)
-  colors = [get(ColorSchemes.batlow, i) for i in range(0, 1; length=n_graph_types)]
+  colors = scheme_colors(n_graph_types)
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   axes = Axis[]
 
@@ -2579,13 +2732,16 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
         line_color = colors[(type_idx-1)%length(colors)+1]
         marker = marker_shapes[(type_idx-1)%length(marker_shapes)+1]
 
+        @show labels[type]
         lines!(ax, params, runtimes; color=line_color, linewidth=1.5)
         scatter!(ax, params, runtimes; label=labels[type],
           color=line_color, marker=marker, markersize=6)
       end
     end
 
-    Legend(fig[1, 3], ax)
+    if h_idx == 1
+      Legend(fig[1, 3], ax)
+    end
   end
 
   colgap!(fig.layout, 4.0)
@@ -2617,7 +2773,7 @@ function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
 
   use_ed_benchmark = L == 4
 
-  fig = Figure(size=multiplot_size(), fontsize=11)
+  fig = Figure(size=multiplot_size(), fontsize=8)
 
   # Outer layout: col 1 = shared ylabel, col 2 = plots grid
   grid = fig[1, 2] = GridLayout()
@@ -2710,13 +2866,14 @@ function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
   end
 
   # shared xlabel
-  fig[2, 2] = Label(fig, "Execution Time (s)"; tellwidth=false)
 
   colgap!(fig.layout, 4.0)
   rowgap!(fig.layout, 4.0)
   colgap!(grid, 2.0)
   rowgap!(grid, 0.0)
   linkyaxes!(axes...)   # shared y-axis
+
+  fig[2, 2] = Label(fig, "Execution Time (s)"; tellwidth=false)
 
   plots_dir = joinpath("plots", dir)
   mkpath(plots_dir)
@@ -2785,7 +2942,7 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
           )
 
           xlims!(ax_err, (0.1, 100.0))
-          ylims!(ax_err, (1e-12, 1))
+          ylims!(ax_err, (1e-14, 1))
 
           push!(axes_imbalance, ax_imb)
           push!(axes_error, ax_err)
@@ -2832,7 +2989,7 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
 
           for d in eachrow(df_graph)
             Dval = D_to_val[d.initial_state_initial_maxdim]
-            color = get(ColorSchemes.viridis, Dval)
+            color = scheme_color(Dval)
             lines!(ax_imb, d.times, d.imbalance;
               label=L"\chi=%$(d.initial_state_initial_maxdim)",
               color=color)
@@ -2971,12 +3128,10 @@ function plot_error_vs_disorder(df::DataFrame; dir)
 
     df_L = filter(row -> row.graph_L == L, df)
     graph_types = sort(unique(df_L.graph_type))
-    color_schemes = [:acton, :bamako]
     linestyles = [:solid, :dash, :dot, :dashdot, :dashdotdot]
     markers = [:circle, :rect, :utriangle, :dtriangle, :diamond, :star5]
 
-    type_idx = 1
-    for type in graph_types
+    for (type_idx, type) in enumerate(graph_types)
       df_type = filter(row -> row.graph_type == type, df_L)
       if isempty(df_type)
         continue
@@ -3032,20 +3187,16 @@ function plot_error_vs_disorder(df::DataFrame; dir)
         end
 
         if !isempty(hs_for_plot)
-          cscheme = color_schemes[mod1(type_idx, length(color_schemes))]
-          if cscheme == :acton
-            line_color = get(ColorSchemes.acton, D_to_val[maxdim])
-          else
-            line_color = get(ColorSchemes.bamako, D_to_val[maxdim])
-          end
-          linestyle = :solid
+          type_fraction = length(graph_types) == 1 ? 0.5 : (type_idx - 1) / (length(graph_types) - 1)
+          fraction = clamp(0.1 + 0.8 * (0.6 * D_to_val[maxdim] + 0.4 * type_fraction), 0.0, 1.0)
+          line_color = scheme_color(fraction)
+          linestyle = linestyles[mod1(type_idx, length(linestyles))]
           marker = markers[mod1(type_idx, length(markers))]
           label = "$type, D=$maxdim"
           lines!(ax, hs_for_plot, errors, label=label, color=line_color, linestyle=linestyle)
           scatter!(ax, hs_for_plot, errors, color=line_color, label=label, marker=marker, markersize=15)
         end
       end
-      type_idx += 1
     end
 
     Legend(fig[1, 2], ax, merge=true; groupgap=10)
@@ -3070,11 +3221,9 @@ function plot_error_vs_system_size(df::DataFrame; dir)
     )
 
     graph_types = sort(unique(df.graph_type))
-    color_schemes = [:acton, :bamako]
     markers = [:circle, :rect, :utriangle, :dtriangle, :diamond, :star5]
 
-    type_idx = 1
-    for type in graph_types
+    for (type_idx, type) in enumerate(graph_types)
       df_type = filter(row -> row.graph_type == type && row.model_h == h, df)
       if isempty(df_type)
         continue
@@ -3126,19 +3275,15 @@ function plot_error_vs_system_size(df::DataFrame; dir)
         end
 
         if !isempty(Ls_for_plot)
-          cscheme = color_schemes[mod1(type_idx, length(color_schemes))]
-          if cscheme == :acton
-            line_color = get(ColorSchemes.acton, D_to_val[maxdim])
-          else
-            line_color = get(ColorSchemes.bamako, D_to_val[maxdim])
-          end
+          type_fraction = length(graph_types) == 1 ? 0.5 : (type_idx - 1) / (length(graph_types) - 1)
+          fraction = clamp(0.1 + 0.8 * (0.6 * D_to_val[maxdim] + 0.4 * type_fraction), 0.0, 1.0)
+          line_color = scheme_color(fraction)
           marker = markers[mod1(type_idx, length(markers))]
           label = "$(labels[type]), D=$maxdim"
           lines!(ax, Ls_for_plot, errors, label=label, color=line_color)
           scatter!(ax, Ls_for_plot, errors, color=line_color, label=label, marker=marker, markersize=15)
         end
       end
-      type_idx += 1
     end
 
     try
@@ -3196,7 +3341,7 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
   plotted_any = false
   # Derive available methods from stats keys
   graph_types = sort(unique(first.(keys(stats))))
-  # Color by graph type using magma colormap
+  # Color by graph type using the default colormap
   n_types = length(graph_types)
   # Avoid extreme ends when few types; keep colors in mid-range
   low, high = 0.2, 0.8
@@ -3228,7 +3373,7 @@ function plot_mean_imbalance(df::DataFrame; L::Int, h, dir, maxdim=nothing)
     #   mean_vals = 1 .- 2 .* (1 .- mean_vals)
     # end
 
-    color = get(ColorSchemes.magma, fracs[i])
+    color = scheme_color(fracs[i])
     style = linestyles[(i-1)%length(linestyles)+1]
     label = "$(labels[type]), D=$Dmax"
     lines!(ax, times, mean_vals; color=color, linestyle=style, label=label, linewidth=2)
@@ -3322,4 +3467,5 @@ function main(df; dir::Union{Nothing,String}=nothing, L_values=nothing, individu
     h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
     dir=base_dir,
   )
+  multiplot_fit_vs_mean(df; dir=base_dir)
 end
