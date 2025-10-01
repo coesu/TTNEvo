@@ -570,37 +570,76 @@ Estimate the decay exponent β from an averaged imbalance curve by fitting
   values ≈ A * t^(-β) on a log–log window t ∈ [tmin, tmax].
 Returns a NamedTuple `(beta, stderr, npts, r2)` or `nothing` if not enough points.
 """
-function fit_power_law_beta(times::AbstractVector, values::AbstractVector; tmin::Real=5.0, tmax::Real=50.0)
+
+
+function fit_power_law_beta(times::AbstractVector, values::AbstractVector;
+  yerrors::Union{Nothing,AbstractVector}=nothing,
+  tmin::Real=5.0, tmax::Real=50.0,
+  known_variances::Bool=true)
+
   isempty(times) && return nothing
   isempty(values) && return nothing
-  # Select window and ensure positivity
-  idx = findall(i -> times[i] >= tmin && times[i] <= tmax && isfinite(values[i]) && values[i] > 0 && isfinite(times[i]), eachindex(times))
+
+  idx = findall(i -> times[i] >= tmin && times[i] <= tmax &&
+                       isfinite(values[i]) && values[i] > 0 &&
+                       isfinite(times[i]), eachindex(times))
   length(idx) < 3 && return nothing
+
   t = Float64[times[i] for i in idx]
   y = Float64[values[i] for i in idx]
-  # Log–log linear regression: log y = a + b * log t, with β = -b and A = exp(a)
+
   X = log.(t)
   Y = log.(y)
   n = length(X)
-  Sx = sum(X)
-  Sy = sum(Y)
-  Sxx = sum(abs2, X)
-  Sxy = sum(X .* Y)
-  den = n * Sxx - Sx^2
+
+  # weights in log space
+  w = if yerrors === nothing
+    ones(n)
+  else
+    σy = Float64[yerrors[i] for i in idx]
+    σY = σy ./ y               # propagate: σY = σy / y
+    1.0 ./ (σY .^ 2)
+  end
+
+  # weighted sums
+  Sw = sum(w)
+  Sx = sum(w .* X)
+  Sy = sum(w .* Y)
+  Sxx = sum(w .* X .* X)
+  Sxy = sum(w .* X .* Y)
+
+  den = Sw * Sxx - Sx^2
   den == 0 && return nothing
-  b = (n * Sxy - Sx * Sy) / den
-  a = (Sy - b * Sx) / n
-  # Residuals and errors
+
+  b = (Sw * Sxy - Sx * Sy) / den
+  a = (Sy * Sxx - Sx * Sxy) / den
+
+  # residuals
   Ŷ = a .+ b .* X
   resid = Y .- Ŷ
-  s2 = sum(abs2, resid) / max(n - 2, 1)
-  stderr_b = sqrt(s2 * n / den)
-  # R^2
-  SS_tot = sum(abs2, Y .- mean(Y))
-  SS_res = sum(abs2, resid)
-  r2 = SS_tot ≈ 0 ? 1.0 : 1.0 - SS_res / SS_tot
-  return (beta=-b, stderr=stderr_b, npts=n, r2=r2, A=exp(a))
+
+  RSS = sum(w .* resid .^ 2)
+  s2 = known_variances ? 1.0 : RSS / max(n - 2, 1)
+
+  # parameter SEs
+  stderr_b = sqrt(s2 * Sw / den)
+  stderr_a = sqrt(s2 * Sxx / den)
+
+  # weighted R² in log space
+  Ybar_w = Sy / Sw
+  SS_tot = sum(w .* (Y .- Ybar_w) .^ 2)
+  r2 = SS_tot ≈ 0 ? 1.0 : 1.0 - RSS / SS_tot
+
+  return (beta=-b,
+    stderr=stderr_b,
+    A=exp(a),
+    stderr_A=exp(a) * stderr_a,
+    r2=r2,
+    npts=n,
+    rmse_log=sqrt(s2))  # optional: RMSE in log units
 end
+
+
 
 """
   compute_mean_imbalance_stats(df)
@@ -643,7 +682,7 @@ For fixed (L, h), take the highest available χ per `graph_type`, fit β for eac
 simulation on [tmin, tmax], and then average the fitted parameters. Returns a Dict keyed by
 `graph_type::String` with values `(beta, stderr, npts, r2, A, Dmax, nfits)`.
 """
-function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tmax::Real=50.0, Dmax=nothing)
+function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=50.0, tmax::Real=100.0, Dmax=nothing)
   df_lh = filter(row -> row.graph_L == L && row.model_h == h, df)
   isempty(df_lh) && return Dict{String,NamedTuple}()
   df_lh = filter(row -> !isempty(row.times), df_lh)
@@ -694,6 +733,54 @@ function compute_beta_over_gridmean(df::DataFrame; L::Int, h, tmin::Real=5.0, tm
   return out
 end
 
+using DataFrames
+using Logging
+
+
+function compute_beta_with_mean(
+  df::DataFrame;
+  L::Int,
+  h,
+  tmin::Real=50.0,
+  tmax::Real=100.0,
+  Dmax=nothing,
+)
+  df_lh = filter(row -> row.graph_L == L && row.model_h == h && !isempty(row.times), df)
+  isempty(df_lh) && return Dict{String,NamedTuple}()
+
+  stats = compute_mean_imbalance_stats(df_lh)
+  isempty(stats) && return Dict{String,NamedTuple}()
+
+  out = Dict{String,NamedTuple}()
+  methods = sort(unique(first.(keys(stats))))
+  isempty(methods) && return Dict{String,NamedTuple}()
+
+  for method in methods
+    Ds_type = sort([D for (t, D) in keys(stats) if t == method])
+    isempty(Ds_type) && continue
+
+    Dsel = isnothing(Dmax) ? Ds_type[end] : Dmax
+    haskey(stats, (method, Dsel)) || continue
+    st = stats[(method, Dsel)]
+
+    fit = fit_power_law_beta(st.times, st.mean; yerrors=st.stderr, tmin=tmin, tmax=tmax)
+    fit === nothing && continue
+
+    out[string(method)] = (
+      beta=fit.beta,
+      stderr=fit.stderr,
+      npts=fit.npts,
+      r2=fit.r2,
+      A=fit.A,
+      Dmax=Dsel,
+      nfits=1,
+    )
+  end
+
+  return out
+end
+
+
 """
   plot_beta_vs_disorder(df; L_values, h_values, dir, tmin=5.0, tmax=50.0)
 
@@ -724,7 +811,7 @@ function plot_beta_vs_disorder(
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
 
   for (method_idx, method) in enumerate(methods)
-    fig = Figure(size=(500, 300), fontsize=12pt)
+    fig = Figure(size=(400, 250), fontsize=12pt)
     ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta")
 
     xlo, xhi = xlim
@@ -739,7 +826,7 @@ function plot_beta_vs_disorder(
       errs = Float64[]
       hs = Float64[]
       for h in hs_sorted
-        vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax)
+        vals = compute_beta_with_mean(df; L=L, h=h, tmin=tmin, tmax=tmax)
         haskey(vals, method) || continue
         push!(hs, h)
         push!(betas, vals[method].beta)
@@ -765,10 +852,10 @@ function plot_beta_vs_disorder(
       scatter!(ax, hs_use_shifted, betas_use;
         color=color,
         marker=marker,
-        markersize=7,
+        markersize=9,
         strokecolor=:black,
         label="L=$L",
-        strokewidth=0.5,
+        strokewidth=1.0,
       )
 
       cutoff = 1e-4
@@ -776,8 +863,6 @@ function plot_beta_vs_disorder(
 
       lower = errs_use
       upper = errs_use
-      @show yvals
-      @show lower, upper
 
 
       errorbars!(ax, hs_use_shifted, yvals, lower, upper;
@@ -809,15 +894,16 @@ function plot_beta_vs_disorder(
     save(fname, fig)
     save(replace(fname, ".pdf" => ".png"), fig)
     println("Saved β vs h plot for method=$(method) to $(fname)")
+    display(fig)
   end
 end
 
 # --- Shared model (p = [p1, p2, p3, p4]) ---
-model(x, p) = @. p[1] * exp(-p[2] * x) - p[3] * x + p[4]
+model(x, p) = @. p[1] * exp(-p[2] * x) + p[3]
 
 # --- Fit + hc + σ_hc ---
 function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVector, beta_crit=0.01)
-  p0 = [1.0, 0.01, 0.0, 0.0]
+  p0 = [1.0, 0.01, 0.0]
 
   # weights as positional arg BEFORE p0
   fit = curve_fit(model, h, beta, 1.0 ./ (err .^ 2), p0)
@@ -830,10 +916,9 @@ function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVect
 
   # Hand-derived derivatives for uncertainty
   exp_term = exp(-p̂[2] * hc)
-  dfdx = -p̂[1] * p̂[2] * exp_term - p̂[3]
+  dfdx = -p̂[1] * p̂[2] * exp_term
   df_dp = [exp_term,
     -p̂[1] * hc * exp_term,
-    -hc,
     1.0]
   J = -df_dp / dfdx
   σ_hc = sqrt(J' * cov * J)
@@ -843,7 +928,7 @@ end
 
 # --- Main: compute (h,β,σ) per L, fit, and plot everything on one figure ---
 function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractString="FreeGraph", beta_crit=0.01, Dmax=nothing)
-  L_vals = [4, 6, 8]
+  L_vals = [4, 6, 8, 10]
 
   beta_fig = Figure(size=(500, 300), fontsize=9)
   ax_beta = Axis(beta_fig[1, 1],
@@ -863,7 +948,7 @@ function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractS
     betas, errs, hs = Float64[], Float64[], Float64[]
     h_vals = sort(unique(df[df.graph_L.==L, :].model_h))
     for h in h_vals
-      vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
+      vals = compute_beta_with_mean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
       haskey(vals, method) || continue
       push!(hs, h)
       push!(betas, vals[method].beta)
@@ -907,7 +992,7 @@ function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractS
     errorbars!(ax_hc, L_sorted, hc_vals, σhc_vals;
       color=:black,
       whiskerwidth=10,
-      label=L"\chi=128"
+      label=L"\chi=%$Dmax"
     )
     scatter!(ax_hc, L_sorted, hc_vals; color=:black, markersize=8)
     ll = 2:0.01:10
@@ -929,6 +1014,8 @@ function get_beta_values(df::DataFrame; tmin=50.0, tmax=100.0, method::AbstractS
   save(replace(hc_fname, ".pdf" => ".png"), hc_fig)
   println("Saved h_c vs L plot to $(hc_fname)")
 
+  display(beta_fig)
+  display(hc_fig)
   return ax_hc
 end
 
@@ -940,11 +1027,13 @@ function get_beta_values!(ax_beta, ax_hc, df;
   Dmax::Union{Nothing,Int}=nothing,
   color=nothing,
   marker=nothing,
-  L_vals=[4, 6, 8]
+  L_vals=[4, 6, 8],
+  offset=nothing,
+  start=1
 )
   results = Dict{Int,NamedTuple}()
   linestyles = (:solid, :dash, :dot, :dashdot)
-  palette = CairoMakie.Makie.wong_colors()
+  palette = default_colorscheme().colors
   default_markers = (:circle, :rect, :diamond)
   label_assigned = false
 
@@ -952,7 +1041,7 @@ function get_beta_values!(ax_beta, ax_hc, df;
     betas, errs, hs = Float64[], Float64[], Float64[]
     h_vals = sort(unique(df[df.graph_L.==L, :].model_h))
     for h in h_vals
-      vals = compute_beta_over_gridmean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
+      vals = compute_beta_with_mean(df; L=L, h=h, tmin=tmin, tmax=tmax, Dmax)
       haskey(vals, method) || continue
       push!(hs, h)
       push!(betas, vals[method].beta)
@@ -962,9 +1051,9 @@ function get_beta_values!(ax_beta, ax_hc, df;
       continue
     end
 
-    h = collect(hs)[2:end]
-    beta = collect(betas)[2:end]
-    err = collect(errs)[2:end]
+    h = collect(hs)[start:end]
+    beta = collect(betas)[start:end]
+    err = collect(errs)[start:end]
     hc, σ_hc, p̂ = calculate_hc(h, beta, err, beta_crit)
     results[L] = (h=h, beta=beta, err=err, hc=hc, σ_hc=σ_hc, p̂=p̂)
 
@@ -974,9 +1063,9 @@ function get_beta_values!(ax_beta, ax_hc, df;
     legend_label = if isnothing(color)
       L"L=%$L"
     elseif label_assigned
-      nothing
+      L"L=%$L"
     else
-      "test"
+      L"\chi=%$Dmax"
     end
 
     errorbars!(ax_beta, h, beta, err;
@@ -998,13 +1087,18 @@ function get_beta_values!(ax_beta, ax_hc, df;
     if !isnothing(color) && legend_label !== nothing
       label_assigned = true
     end
+    axislegend(ax_beta)
   end
+
 
   if !isempty(results)
     L_sorted = sort(collect(keys(results)))
     hc_vals = [results[L].hc for L in L_sorted]
     σhc_vals = [results[L].σ_hc for L in L_sorted]
 
+    if !isnothing(offset)
+      L_sorted = L_sorted .+ offset
+    end
     hc_color = isnothing(color) ? :black : color
     hc_marker = isnothing(marker) ? :circle : marker
     errorbars!(ax_hc, L_sorted, hc_vals, σhc_vals;
@@ -1014,36 +1108,53 @@ function get_beta_values!(ax_beta, ax_hc, df;
     scatter!(ax_hc, L_sorted, hc_vals;
       color=hc_color,
       marker=hc_marker,
+      label=L"\chi=%$Dmax"
     )
   end
 end
 
-function beta_combined_plot(df)
-  beta_fig = Figure(size=multiplot_size())
+function all_beta_plots(df_all, df_beta)
+  beta_combined_plot(df_all; dir="beta_comp", start=2, beta_crit=0.01, use_color=false, D_values=[128])
+  beta_combined_plot(df_all; dir="beta_chi", start=2, beta_crit=0.01, use_color=true, D_values=[32, 64, 128, 196])
+
+  plot_beta_vs_disorder(df_all; dir="plots", tmin=50.0, tmax=100.0, xlim=(2.5, 50), ylim=(-0.1, 0.3))
+
+  beta_combined_plot(df_beta; dir="beta_32", start=1, beta_crit=0.002, D_values=[32], use_color=false)
+end
+
+function beta_combined_plot(df; dir="beta", start=1, beta_crit=0.002, use_color=true, D_values)
+  beta_fig = Figure(size=(400, 250))
   ax_beta = Axis(beta_fig[1, 1], xlabel="h", ylabel="β")
-  beta_crit = 0.01
   hlines!(ax_beta, [beta_crit]; color=:gray, linestyle=:dash)
 
-  hc_fig = Figure(size=(500, 300), fontsize=12pt)
+  hc_fig = Figure(size=(400, 250), fontsize=12pt)
   # hc_fig = Figure(size=(500, 300))
   ax_hc = Axis(hc_fig[1, 1], xlabel=L"L", ylabel=L"h_c")
 
-  palette = CairoMakie.Makie.wong_colors()
+  palette = default_colorscheme().colors
   markers = (:circle, :rect, :diamond, :utriangle, :dtriangle)
-  D_values = [128]
+  # D_values = [32, 64, 128, 196]
 
   for (i, D) in enumerate(D_values)
-    color = palette[1+(i-1)%length(palette)]
+    color = palette[2+(i-1)%length(palette)]
     marker = markers[1+(i-1)%length(markers)]
+    if !use_color
+      color = :black
+      color = nothing
+    end
     get_beta_values!(ax_beta, ax_hc, df;
       Dmax=D,
       beta_crit=beta_crit,
       # method="SnakeGraph",
-      # color=color,
-      L_vals=[4, 6, 8],
+      color=color,
+      L_vals=[4, 6, 8, 10],
       marker=marker,
+      offset=(i - 2) * 0.05,
+      start
     )
   end
+
+  axislegend(ax_hc, position=:rb)
 
   ll = LinRange(4, 10, 400)
   norm = 50 / avalanche_critical_disorder(8)
@@ -1056,7 +1167,7 @@ function beta_combined_plot(df)
   # axislegend(ax_beta, position=:rb)
   # axislegend(ax_hc, position=:rb)
 
-  plots_dir = joinpath("plots", "beta")
+  plots_dir = joinpath("plots", dir)
   mkpath(plots_dir)
 
   beta_fname = joinpath(plots_dir, "beta_vs_h_comparison.pdf")
@@ -1147,9 +1258,7 @@ function plot_fit_vs_mean(
       for (i, method) in enumerate(methods)
         Ds_type = sort([D for (t, D) in keys(stats) if t == method])
         isempty(Ds_type) && continue
-        @show Ds_type
         Dmax = Ds_type[end]
-        Dmax = 64
         st = stats[(method, Dmax)]
 
         # Fit β and A on the specified window
@@ -1228,7 +1337,6 @@ function multiplot_fit_vs_mean(
   axes = Axis[]  # collect axes so we can link them later
 
   for (i, h) in enumerate(h_values)
-    @show h
     df_lh = filter(row -> row.graph_L == L && row.model_h == h && !isempty(row.times), df)
     isempty(df_lh) && continue
 
@@ -1945,7 +2053,7 @@ function load_general_dirs(dirs; remove_dup=true, remove_small_time=true)
     end
   end
   if remove_small_time
-    df = remove_small_time_simulations(df; t_end=50.0)
+    df = remove_small_time_simulations(df; t_end=90.0)
   end
   if remove_dup
     df = remove_duplicates(df)
@@ -2545,7 +2653,6 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   grid = fig[1, 2] = GridLayout()
   if L == 4
     fig[1, 1] = Label(fig, L"\langle |I_{\mathrm{ED}} - I_{\mathrm{TN}}| \rangle"; rotation=π / 2, tellheight=false)
-
   else
     fig[1, 1] = Label(fig, L"\langle |I_{\chi_{\mathrm{max}}} - I_{\chi}| \rangle"; rotation=π / 2, tellheight=false)
   end
@@ -2933,16 +3040,17 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
             xticks=logticks1_with_minors(-1, 2),
             limits=(0.1, 100, nothing, nothing),
           )
+          yl = L == 4 ? L"|I_{\mathrm{ED}} - I_{\chi}|" : L"|I_{\chi_{\mathrm{max}}} - I_{\chi}|"
           ax_err = Axis(fig[i, 2],
             xlabel=L"t",
-            ylabel=L"|I_{\mathrm{ED}} - I_{\mathrm{TN}}|",
+            ylabel=yl,
             xscale=log10,
             yscale=log10,
             xticks=logticks1_with_minors(-1, 2),
           )
 
           xlims!(ax_err, (0.1, 100.0))
-          ylims!(ax_err, (1e-14, 1))
+          ylims!(ax_err, (1e-8, 1))
 
           push!(axes_imbalance, ax_imb)
           push!(axes_error, ax_err)
