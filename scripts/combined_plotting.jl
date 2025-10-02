@@ -93,11 +93,11 @@ individual_size = (8cm, 4cm)
 
 global labels = Dict("FreeGraph" => "TTN", "SnakeGraph" => "MPS", "HierarchicalTree" => "Hierch", "HilbertCurve" => "Hilbert")
 
-const dir_labels = Dict(
-  "bench_baseline" => "Baseline",
+dir_labels = Dict(
+  "bench_baseline" => "1TDVP",
   "bench_krylov" => "Krylov",
-  "bench_shrewd" => "Shrewd",
-  "bench_twosite" => "Two-Site",
+  "bench_shrewd" => "CBE",
+  "bench_twosite" => "2TDVP",
 )
 
 dir_label(dir::AbstractString) = begin
@@ -188,6 +188,12 @@ function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}
     error("Failed to load config from $(fullpath): $(e)")
   end
 
+  dir_labels = Dict(
+    "bench_baseline" => "1TDVP",
+    "bench_krylov" => "Krylov",
+    "bench_shrewd" => "CBE",
+    "bench_twosite" => "2TDVP",
+  )
   # Extract simulation info
   L = cfg.graph.L
   h = cfg.model.h
@@ -279,7 +285,6 @@ function plot_simulation_with_ed(sim_dir::String; outfile::Union{Nothing,String}
   ax = Axis(fig[1, 1],
     xlabel="t",
     ylabel="|ED − TN| imbalance",
-    title="L=$(L), h=$(h), grid=$(grid)",
     yscale=log10,
     xscale=log10,
   )
@@ -397,7 +402,6 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
   ax = Axis(fig[1, 1],
     xlabel="t",
     ylabel=L"|I_{\mathrm{ED}} - I_{\mathrm{TN}}|",
-    title="L=$(L), h=$(h), grid=$(grid), test",
     yscale=log10,
     xscale=log10,
   )
@@ -429,7 +433,14 @@ function plot_simulations_with_ed(sim_dirs::Vector{String}; labels=nothing, outf
 
   # Colors/labels
   default_labels = [dir_label(dir) for dir in sim_dirs]
+  @show default_labels
   labels = isnothing(labels) ? default_labels : labels
+  labels = ["1TDVP",
+    "Krylov",
+    "CBE",
+    "2TDVP",
+  ]
+  @show labels
 
   all_rt_vals = Float64[]
 
