@@ -74,8 +74,13 @@ function publication_theme()
       # xticklabelsize=12,
       # yticklabelsize=12,
       xtickalign=1,
+      xminortickalign=1,
       ytickalign=1,
+      yminortickalign=1,
       spinewidth=1,
+      xgridvisible=true, ygridvisible=true,
+      xgridcolor=RGBAf(0, 0, 0, 0.12), ygridcolor=RGBAf(0, 0, 0, 0.12),
+      xminorgridcolor=RGBAf(0, 0, 0, 0.12), yminorgridcolor=RGBAf(0, 0, 0, 0.12),
     ),
     Legend=(
       framevisible=false,
@@ -807,7 +812,8 @@ function plot_beta_vs_disorder(
   tmin::Real=50.0,
   tmax::Real=100.0,
   xlim::Tuple{<:Real,<:Real}=(NaN, NaN),
-  ylim::Tuple{<:Real,<:Real}=(0.0, 1.0),
+  ylim::Tuple{<:Real,<:Real}=(1e-3, 0.3),
+  yscale=identity,
 )
   df_sub = filter(row -> row.graph_L in L_values && row.model_h in h_values, df)
   methods = sort(unique(df_sub.graph_type))
@@ -823,8 +829,16 @@ function plot_beta_vs_disorder(
 
   for (method_idx, method) in enumerate(methods)
     fig = Figure(size=(400, 250), fontsize=12pt)
-    ax = Axis(fig[1, 1], xlabel=L"h", ylabel=L"\beta")
-
+    ax = Axis(fig[1, 1],
+      xlabel=L"h",
+      ylabel=L"\beta",
+      yscale=log10,  # Assuming logarithmic scale
+      yticks=LogTicks([-1, -2, -3]),
+      yminorticks=IntervalsBetween(9),  # Automatic minor ticks (9 per decade)
+      yminorticksvisible=true,  # Show minor ticks
+      yminorgridwidth=1,
+      yminorgridvisible=true,  # Show minor grid lines
+    )
     xlo, xhi = xlim
     if isnan(xlo) || isnan(xhi)
       xlo, xhi = minimum(hs_sorted), maximum(hs_sorted)
@@ -853,13 +867,20 @@ function plot_beta_vs_disorder(
       color = scheme_color(color_fracs[iL])
       marker = marker_shapes[(iL-1)%length(marker_shapes)+1]
 
-
       # small horizontal offset for each method
-      offset = 0.1 * (iL - (length(Ls_sorted) + 1) / 2)
+      offset = 0.2 * (iL - (length(Ls_sorted) + 1) / 2)
 
       hs_use_shifted = hs_use .+ offset
 
-      # lines!(ax, hs_use, betas_use; color=color, linewidth=1.8, label="L=$L")
+      cutoff = 1e-3
+      if yscale == log10
+        clamp!(betas_use, cutoff, 2.0)
+        clamp!(errs_use, 0.0, 2.0 - cutoff)  # Errors can't exceed the range of betas_use
+        lower = min.(errs_use, betas_use .- cutoff)  # Lower error can't push value below cutoff
+        upper = min.(errs_use, 2.0 .- betas_use)  # Upper error can't push value above 2.0
+      end
+
+      # Plotting
       scatter!(ax, hs_use_shifted, betas_use;
         color=color,
         marker=marker,
@@ -869,12 +890,7 @@ function plot_beta_vs_disorder(
         strokewidth=1.0,
       )
 
-      cutoff = 1e-4
       yvals = betas_use
-
-      lower = errs_use
-      upper = errs_use
-
 
       errorbars!(ax, hs_use_shifted, yvals, lower, upper;
         direction=:y,
@@ -883,15 +899,6 @@ function plot_beta_vs_disorder(
         whiskerwidth=6,
       )
       hlines!(ax, [0.0]; color=:black, linewidth=1.0, linestyle=:dash)
-
-      # if !isempty(errs_use)
-      #   errorbars!(ax, hs_use, max.(betas_use, 1e-4), errs_use;
-      #     direction=:y,
-      #     color=color,
-      #     linewidth=1.0,
-      #     whiskerwidth=6,
-      #   )
-      # end
     end
 
     try
@@ -910,11 +917,11 @@ function plot_beta_vs_disorder(
 end
 
 # --- Shared model (p = [p1, p2, p3, p4]) ---
-model(x, p) = @. p[1] * exp(-p[2] * x) + p[3]
+model(x, p) = @. p[1] * exp(-p[2] * x)
 
 # --- Fit + hc + σ_hc ---
 function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVector, beta_crit=0.01)
-  p0 = [1.0, 0.01, 0.0]
+  p0 = [1.0, 0.01]
 
   # weights as positional arg BEFORE p0
   fit = curve_fit(model, h, beta, 1.0 ./ (err .^ 2), p0)
@@ -930,7 +937,7 @@ function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVect
   dfdx = -p̂[1] * p̂[2] * exp_term
   df_dp = [exp_term,
     -p̂[1] * hc * exp_term,
-    1.0]
+  ]
   J = -df_dp / dfdx
   σ_hc = sqrt(J' * cov * J)
 
@@ -1156,19 +1163,19 @@ function beta_combined_plot(df; dir="beta", start=1, beta_crit=0.002, use_color=
     get_beta_values!(ax_beta, ax_hc, df;
       Dmax=D,
       beta_crit=beta_crit,
-      # method="SnakeGraph",
       color=color,
-      L_vals=[4, 6, 8, 10],
+      L_vals=[4, 6, 8, 10, 12],
       marker=marker,
       offset=(i - 2) * 0.05,
-      start
+      start,
+      tmin=50.0
     )
   end
 
   axislegend(ax_hc, position=:rb)
 
-  ll = LinRange(4, 10, 400)
-  norm = 50 / avalanche_critical_disorder(8)
+  # ll = LinRange(4, 10, 400)
+  # norm = 50 / avalanche_critical_disorder(8)
   # lines!(ax_hc, ll, norm * avalanche_critical_disorder.(ll);
   #   color=:black,
   #   linestyle=:dash,
@@ -1329,11 +1336,9 @@ function plot_fit_vs_mean(
   end
 end
 
-
-
 function multiplot_fit_vs_mean(
   df::DataFrame;
-  L::Int=8,
+  L::Int=12,
   h_values=[5.0, 10.0, 20.0, 30.0, 50.0],
   dir::String,
   tmin::Real=50.0,
@@ -1781,18 +1786,24 @@ function load_dicts(dir; start=nothing)
 
   results = Vector{Any}(nothing, length(jld2_files))
 
-  @threads for i in 1:length(jld2_files)
+  failed_files = Vector{Any}()
+
+  for i in 1:length(jld2_files)
     filepath = jld2_files[i]
     try
       results[i] = load(filepath)["results"]
-    catch e
-      @show load(filepath)
-      return 0
-      @warn "Could not load file '$filepath' on thread $(threadid()): $e"
+    catch
+      push!(failed_files, filepath)
+      @warn "Could not load file '$filepath' on thread $(threadid())"
     end
   end
   loaded_data = filter(!isnothing, results)
   println("Finished loading. Loaded $(length(loaded_data)) files successfully.")
+  open("failed_files.txt", "w") do io
+    for f in failed_files
+      println(io, f)
+    end
+  end
   return loaded_data
 end
 
@@ -2070,10 +2081,10 @@ function load_general_dirs(dirs; remove_dup=true, remove_small_time=true)
     df = remove_duplicates(df)
   end
   df.imbalance = TTNEvo.columnar_imbalance_total.(df.sz)
-  # jldopen("data/dataframe.jld2", "w") do file
-  #   file["dataframe"] = df
-  # end
-  return df
+
+  df_selection = select!(df, Not([:maxdim, :sz]))
+
+  return df_selection
 end
 
 function heatmaps(dir)
@@ -2578,6 +2589,7 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   return fig
 end
 
+
 function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
   graph_types = sort(unique(filter(row -> row.graph_L == L, df).graph_type))
@@ -2680,9 +2692,19 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   marker_shapes = [:circle, :rect, :utriangle, :dtriangle, :cross]
   axes = Axis[]
 
+  alphabet = 'a':'z'  # panel labels
+
   for (h_idx, h) in enumerate(h_values)
     ax = Axis(grid[1, h_idx]; yscale=log10)
     push!(axes, ax)
+
+    # add panel label (a), (b), (c) ...
+    text!(ax, 0.1, 0.05,
+      text="$(alphabet[h_idx]))",
+      align=(:left, :bottom),
+      fontsize=11,
+      space=:relative,
+    )
 
     if L == 4
       ax.xticks = ([0, 0.5, 1])
@@ -2707,7 +2729,6 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
 
     for s in get(data_by_h, h, NamedTuple[])
       marker = marker_shapes[(s.type_idx-1)%length(marker_shapes)+1]
-      # connect points by increasing params for readability
       if !isempty(s.params)
         order = sortperm(s.params)
         lines!(ax, s.params[order], s.errors[order]; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
@@ -2730,14 +2751,13 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
     end
     if h_idx == 1
       if L == 12
-        axislegend(ax; position=(0.05, 0.12), framevisible=false, patchlabelgap=-4)
+        axislegend(ax; position=(0.05, 0.02), framevisible=false, patchlabelgap=-4)
       else
-        axislegend(ax; position=(0.6, 0.12), framevisible=false, patchlabelgap=-4)
+        axislegend(ax; position=(0.6, 0.02), framevisible=false, patchlabelgap=-4)
       end
     end
   end
 
-  # Set decade ticks to avoid fractional exponents on the colorbar
   cb2_exp_min = floor(Int, log10(global_rt_min + 1e-16))
   cb2_exp_max = ceil(Int, log10(global_rt_max + 1e-16))
   cb2_positions = 10.0 .^ collect(cb2_exp_min:cb2_exp_max)
@@ -2767,6 +2787,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
 
   return fig
 end
+
 
 function multiplot_size()
   return (500, 200)
@@ -3572,19 +3593,19 @@ function main(df; dir::Union{Nothing,String}=nothing, L_values=nothing, individu
 
   plot_error_vs_disorder(df; dir=base_dir)
   plot_error_vs_system_size(df; dir=base_dir)
-  plot_beta_vs_disorder(df;
-    L_values=L_values,
-    h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
-    dir=base_dir,
-    tmin=50.0,
-    tmax=100.0,
-    xlim=(0.0, 50.0),
-    ylim=(0.0, 1.0),
-  )
-  plot_fit_vs_mean(df;
-    L_values=L_values,
-    h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
-    dir=base_dir,
-  )
-  multiplot_fit_vs_mean(df; dir=base_dir)
+  # plot_beta_vs_disorder(df;
+  #   L_values=L_values,
+  #   h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
+  #   dir=base_dir,
+  #   tmin=50.0,
+  #   tmax=100.0,
+  #   xlim=(0.0, 50.0),
+  #   ylim=(0.0, 1.0),
+  # )
+  # plot_fit_vs_mean(df;
+  #   L_values=L_values,
+  #   h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
+  #   dir=base_dir,
+  # )
+  # multiplot_fit_vs_mean(df; dir=base_dir)
 end

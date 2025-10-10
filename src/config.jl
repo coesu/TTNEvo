@@ -2,9 +2,9 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [4, 6, 8, 10]
+L = [8, 10, 12]
 h = [20.0]
-h = 5:5:40
+h = 45:5:50
 
 time_step = [0.1]
 total_time = [100.0]
