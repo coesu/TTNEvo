@@ -778,9 +778,9 @@ function compute_beta_with_mean(
     Dsel = isnothing(Dmax) ? Ds_type[end] : Dmax
     haskey(stats, (method, Dsel)) || continue
     st = stats[(method, Dsel)]
-
     fit = fit_power_law_beta(st.times, st.mean; yerrors=st.stderr, tmin=tmin, tmax=tmax)
     fit === nothing && continue
+    fit.beta === NaN && continue
 
     out[string(method)] = (
       beta=fit.beta,
@@ -923,7 +923,6 @@ model(x, p) = @. p[1] * exp(-p[2] * x)
 function calculate_hc(h::AbstractVector, beta::AbstractVector, err::AbstractVector, beta_crit=0.01)
   p0 = [1.0, 0.01]
 
-  # weights as positional arg BEFORE p0
   fit = curve_fit(model, h, beta, 1.0 ./ (err .^ 2), p0)
   p̂ = coef(fit)
   cov = estimate_covar(fit)
@@ -1105,7 +1104,6 @@ function get_beta_values!(ax_beta, ax_hc, df;
     if !isnothing(color) && legend_label !== nothing
       label_assigned = true
     end
-    axislegend(ax_beta)
   end
 
 
@@ -1132,22 +1130,21 @@ function get_beta_values!(ax_beta, ax_hc, df;
 end
 
 function all_beta_plots(df_all, df_beta)
-  beta_combined_plot(df_all; dir="beta_comp", start=2, beta_crit=0.01, use_color=false, D_values=[128])
-  beta_combined_plot(df_all; dir="beta_chi", start=2, beta_crit=0.01, use_color=true, D_values=[32, 64, 128, 196])
-
-  plot_beta_vs_disorder(df_all; dir="plots", tmin=50.0, tmax=100.0, xlim=(2.5, 50), ylim=(-0.1, 0.3))
-
-  beta_combined_plot(df_beta; dir="beta_32", start=1, beta_crit=0.002, D_values=[32], use_color=false)
+  # beta_combined_plot(df_all; dir="beta_comp", start=2, beta_crit=0.01, use_color=false, D_values=[128], tmin=50.0)
+  beta_combined_plot(df_all; dir="beta_chi_new", start=2, beta_crit=0.005, use_color=true, D_values=[32, 64, 128], tmin=25.0)
+  plot_beta_vs_disorder(df_all; dir="plots_new", tmin=25.0, tmax=100.0, xlim=(2.5, 50), yscale=log10)
+  plot_beta_vs_disorder(df_beta; dir="beta_32_new", tmin=25.0, tmax=100.0, yscale=log10, L_values=4:2:12, h_values=5:5:50)
+  beta_combined_plot(df_beta; dir="beta_32_new", start=1, beta_crit=0.005, D_values=[32], use_color=false, tmin=25.0)
 end
 
-function beta_combined_plot(df; dir="beta", start=1, beta_crit=0.002, use_color=true, D_values)
+function beta_combined_plot(df; dir="beta", start=1, beta_crit=0.002, use_color=true, D_values, tmin)
   beta_fig = Figure(size=(400, 250))
   ax_beta = Axis(beta_fig[1, 1], xlabel="h", ylabel="β")
   hlines!(ax_beta, [beta_crit]; color=:gray, linestyle=:dash)
 
   hc_fig = Figure(size=(400, 250), fontsize=12pt)
   # hc_fig = Figure(size=(500, 300))
-  ax_hc = Axis(hc_fig[1, 1], xlabel=L"L", ylabel=L"h_c")
+  ax_hc = Axis(hc_fig[1, 1], xlabel=L"L", ylabel=L"h_c", xticks=[4, 6, 8, 10, 12])
 
   palette = default_colorscheme().colors
   markers = (:circle, :rect, :diamond, :utriangle, :dtriangle)
@@ -1168,10 +1165,11 @@ function beta_combined_plot(df; dir="beta", start=1, beta_crit=0.002, use_color=
       marker=marker,
       offset=(i - 2) * 0.05,
       start,
-      tmin=50.0
+      tmin
     )
   end
 
+  axislegend(ax_beta)
   axislegend(ax_hc, position=:rb)
 
   # ll = LinRange(4, 10, 400)
@@ -1540,6 +1538,7 @@ function compute_benchmark_error_and_rows(df_current::DataFrame, df_benchmark::D
   error = abs.(benchmark_matrix .- current_matrix)
   error = mean(error, dims=1)
   mean_error = exp.(mean(log.(error)))
+  mean_error = mean(error)
   std_error = min(std(error), mean_error * 0.9) / sqrt(length(error))
 
   return mean_error, std_error, df_current_common
@@ -1788,7 +1787,7 @@ function load_dicts(dir; start=nothing)
 
   failed_files = Vector{Any}()
 
-  for i in 1:length(jld2_files)
+  @threads for i in 1:length(jld2_files)
     filepath = jld2_files[i]
     try
       results[i] = load(filepath)["results"]
@@ -2074,8 +2073,9 @@ function load_general_dirs(dirs; remove_dup=true, remove_small_time=true)
       push!(df, flat_dict, cols=:union)
     end
   end
+
   if remove_small_time
-    df = remove_small_time_simulations(df; t_end=90.0)
+    df = remove_small_time_simulations(df; t_end=50.0)
   end
   if remove_dup
     df = remove_duplicates(df)
@@ -2562,7 +2562,9 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   cb_exp_min = floor(Int, log10(global_rt_min + 1e-16))
   cb_exp_max = ceil(Int, log10(global_rt_max + 1e-16))
   cb_positions = 10.0 .^ collect(cb_exp_min:cb_exp_max)
-  cb_labels = ["10^$(e)" for e in cb_exp_min:cb_exp_max]
+  @show "testtest"
+  @show cb_exp_min:cb_exp_max
+  cb_labels = [L"10^{ %$e }" for e in cb_exp_min:cb_exp_max]
 
   Colorbar(fig[1, 3],
     colormap=default_colorscheme(),
@@ -2589,9 +2591,9 @@ function plot_params_error_color_runtime_allpoints(df::DataFrame; L::Int, dir)
   return fig
 end
 
-
 function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
+  @show h_values
   graph_types = sort(unique(filter(row -> row.graph_L == L, df).graph_type))
 
   if isempty(h_values)
@@ -2607,6 +2609,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   global_rt_min = Inf
   global_rt_max = -Inf
 
+  display(filter(row -> row.graph_L == L, df))
   for h in h_values
     series_list = NamedTuple[]
     df_h_filtered = filter(row -> row.graph_L == L && row.model_h == h, df)
@@ -2700,7 +2703,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
 
     # add panel label (a), (b), (c) ...
     text!(ax, 0.1, 0.05,
-      text="$(alphabet[h_idx]))",
+      text="($(alphabet[h_idx]))",
       align=(:left, :bottom),
       fontsize=11,
       space=:relative,
@@ -2761,7 +2764,7 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   cb2_exp_min = floor(Int, log10(global_rt_min + 1e-16))
   cb2_exp_max = ceil(Int, log10(global_rt_max + 1e-16))
   cb2_positions = 10.0 .^ collect(cb2_exp_min:cb2_exp_max)
-  cb2_labels = [L"10^%$(e)" for e in cb2_exp_min:cb2_exp_max]
+  cb2_labels = [L"10^{%$(e)}" for e in cb2_exp_min:cb2_exp_max]
 
   Colorbar(fig[1, 3],
     colormap=default_colorscheme(),
@@ -2900,6 +2903,118 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
   return fig
 end
 
+function plot_individual_imbalance_single(df, L_values=[4, 6, 8]; dir)
+  for L in L_values
+    h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
+    for h in h_values
+      gridnum_values = sort(unique(filter(row -> row.model_h == h && row.graph_L == L, df).graph_gridnum))
+      for grid in gridnum_values
+        println("Plotting L=$(L) h=$(h) grid=$(grid)")
+        dfi = filter(row -> row.graph_L == L && row.model_h == h && row.graph_gridnum == grid, df)
+        dfi = sort(dfi, [:graph_type, :initial_state_initial_maxdim])
+
+        graph_types = sort(unique(dfi.graph_type))
+        if isempty(graph_types)
+          continue
+        end
+
+        # single-column figure (imbalance only), linear x-axis
+        local fig
+        if L == 4
+          fig = Figure(fontsize=8pt, size=(450, 450), figure_padding=5)
+        else
+          fig = Figure(fontsize=8pt, size=(450, 300), figure_padding=5)
+        end
+
+        axes_imbalance = Axis[]
+        axis_labels = Any[]
+
+        # ED benchmark (only for L==4); used just to overlay on imbalance panel
+        ed_imbalance = nothing
+        if L == 4
+          ed_data, _ = get_ed_benchmark(L, h, [grid])
+          if !isempty(ed_data)
+            ed_imbalance = ed_data
+          end
+        end
+
+        for (i, gtype) in enumerate(graph_types)
+          ax_imb = Axis(fig[i, 1];
+            xlabel=L"t",
+            ylabel=L"I",
+            # linear x-axis (removed xscale=log10)
+            # no custom log ticks; let Makie choose
+          )
+          push!(axes_imbalance, ax_imb)
+
+          label_txt = get(labels, gtype, string(gtype))
+          push!(axis_labels, L"%$(label_txt) $h=%$h$, $L=%$L$")
+        end
+
+        if length(axes_imbalance) > 1
+          linkxaxes!(axes_imbalance...)
+          linkyaxes!(axes_imbalance...)
+        end
+
+        # color mapping across χ values
+        Ds = unique(dfi.initial_state_initial_maxdim)
+        Ds_sorted = sort(Ds, rev=true)
+        D_to_val = if length(Ds_sorted) > 1
+          Dict(D => (i - 1) / (length(Ds_sorted) - 1) for (i, D) in enumerate(Ds_sorted))
+        else
+          Dict(D => 0.5 for (i, D) in enumerate(Ds_sorted))
+        end
+
+        for (idx, gtype) in enumerate(graph_types)
+          ax_imb = axes_imbalance[idx]
+          df_graph = filter(row -> row.graph_type == gtype, dfi)
+
+          for d in eachrow(df_graph)
+            Dval = D_to_val[d.initial_state_initial_maxdim]
+            color = scheme_color(Dval)
+            lines!(ax_imb, d.times, d.imbalance;
+              label=L"\chi=%$(d.initial_state_initial_maxdim)", color=color)
+          end
+
+          # Optional: overlay ED curve on imbalance (only for L==4)
+          if ed_imbalance !== nothing
+            max_T = maximum(maximum.(df_graph.times))
+            max_T = min(max_T, 0.1 * length(ed_imbalance))
+            if max_T >= 0.1
+              time = 0.1:0.1:max_T
+              lines!(ax_imb, time, ed_imbalance[1:length(time)]; label="ED", color=:black)
+            end
+          end
+        end
+
+        for (idx, ax) in enumerate(axes_imbalance)
+          text!(ax, 0.98, 0.98;
+            text=axis_labels[idx],
+            align=(:right, :top),
+            space=:relative)
+          if idx != length(axes_imbalance)
+            hidexdecorations!(ax, grid=false, label=true)
+            ax.xlabelvisible = false
+          end
+        end
+
+        # legend on the right
+        try
+          Legend(fig[1:length(graph_types), 2], axes_imbalance[1]; merge=true)
+        catch
+        end
+
+        plot_dir = joinpath("plots", dir, "individual")
+        mkpath(plot_dir)
+        pdf_path = joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).pdf")
+        png_path = joinpath(plot_dir, "imbalance_L=$(L)_h=$(h)_grid=$(grid).png")
+        save(pdf_path, fig)
+        save(png_path, fig)
+        println("Saved imbalance-only plot to $(pdf_path) and $(png_path)")
+      end
+    end
+  end
+end
 
 function plot_accuracy_vs_runtime(df::DataFrame; L::Int, dir)
   h_values = sort(unique(filter(row -> row.graph_L == L, df).model_h))
@@ -3082,7 +3197,11 @@ function plot_individual_imbalance(df, L_values=[4, 6, 8]; dir)
           )
 
           xlims!(ax_err, (0.1, 100.0))
-          ylims!(ax_err, (1e-8, 1))
+          if L == 4
+            ylims!(ax_err, (1e-14, 1))
+          else
+            ylims!(ax_err, (1e-8, 1))
+          end
 
           push!(axes_imbalance, ax_imb)
           push!(axes_error, ax_err)
@@ -3607,5 +3726,5 @@ function main(df; dir::Union{Nothing,String}=nothing, L_values=nothing, individu
   #   h_values=[0.0, 2.5, 5.0, 7.5, 10.0, 20.0, 30.0, 50.0],
   #   dir=base_dir,
   # )
-  # multiplot_fit_vs_mean(df; dir=base_dir)
+  multiplot_fit_vs_mean(df; dir=base_dir)
 end

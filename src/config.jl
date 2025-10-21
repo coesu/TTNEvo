@@ -2,20 +2,20 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [8, 10, 12]
-h = [20.0]
-h = 45:5:50
+L = [12]
+h = [10.0, 20.0, 30.0]
+# h = 45:5:50
 
 time_step = [0.1]
 total_time = [100.0]
 time_evo_method = [:onesite]
 
-maxdim = [32]
+maxdim = [128]
 # maxdim = [64]
 cutoff = [1e-12]
 nsite = [1]
 qns = [false]
-grid_number = collect(1:50)
+grid_number = collect(2:3)
 
 init_state = [:columnar_neel]
 initial_maxdim = [2]
@@ -24,9 +24,9 @@ observe_every = [1]
 
 save_path_training = "data/train"
 
-tree_pre_det = false
-tree_opt = true
-snake = false
+tree_pre_det = true
+tree_opt = false
+snake = true
 hilbert = false
 hierachical = false
 
