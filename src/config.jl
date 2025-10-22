@@ -2,20 +2,20 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [12]
-h = [10.0, 20.0, 30.0]
-# h = 45:5:50
+L = [4, 6, 8, 10, 12]
+# h = [10.0, 20.0, 30.0]
+h = 5:5:50
 
 time_step = [0.1]
 total_time = [100.0]
 time_evo_method = [:onesite]
 
-maxdim = [128]
+maxdim = [32]
 # maxdim = [64]
 cutoff = [1e-12]
 nsite = [1]
 qns = [false]
-grid_number = collect(2:3)
+grid_number = collect(51:100)
 
 init_state = [:columnar_neel]
 initial_maxdim = [2]
@@ -26,13 +26,12 @@ save_path_training = "data/train"
 
 tree_pre_det = true
 tree_opt = false
-snake = true
+snake = false
 hilbert = false
 hierachical = false
 
 parameter_sets = []
-for Li in L,
-  total_timei in total_time,
+for total_timei in total_time,
   time_stepi in time_step,
   hi in h,
   grid_numberi in grid_number,
@@ -42,13 +41,14 @@ for Li in L,
   qnsi in qns,
   init_statei in init_state,
   initial_maxdimi in initial_maxdim,
+  Li in L,
   methodi in time_evo_method
 
   if tree_pre_det
     push!(parameter_sets, TreeConfig(
       TimeEvolutionConfig(t_range=(0, total_timei), t_step=time_stepi, maxdim=maxdimi, nsite=nsitei, cutoff=cutoffi, qns=qnsi, method=methodi),
       InitialStateConfig(init_statei, Dict(:initial_maxdim => maxdimi, :qns => qnsi)),
-      "L$Li-column-tree-new-pre-det",
+      "L$Li-column-tree-beta-pre-det",
       HeisenbergModel(J1=1.0, JZ=1.0, h=hi),
       FreeGraph(L=Li, gridnum=grid_numberi, with_ancilla=false, full_interaction=true, optimize_structure=false, optimize_bonddim=true, save_tree=false, load_tree_path=generate_tree_filename(Li, hi, grid_numberi, 32)),
       Observer()

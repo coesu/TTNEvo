@@ -483,8 +483,8 @@ function plot_all_single(df::DataFrame; dir="plots/beta_new/single/")
   for row in eachrow(df)
     plt[1] = row.times
     plt[2] = row.imbalance
-    ax.title = "χ=$(row.initial_state_initial_maxdim), L=$(row.graph_L), h=$(row.model_h)"
-    save(joinpath(dir, "plot_χ=$(row.initial_state_initial_maxdim)_L=$(row.graph_L)_h=$(row.model_h).png"), fig)
+    ax.title = "χ=$(row.initial_state_initial_maxdim), L=$(row.graph_L), h=$(row.model_h), grid=$(row.graph_gridnum)"
+    save(joinpath(dir, "plot_χ=$(row.initial_state_initial_maxdim)_L=$(row.graph_L)_h=$(row.model_h)_grid=$(row.graph_gridnum).png"), fig)
   end
 
 end

@@ -2075,7 +2075,7 @@ function load_general_dirs(dirs; remove_dup=true, remove_small_time=true)
   end
 
   if remove_small_time
-    df = remove_small_time_simulations(df; t_end=50.0)
+    df = remove_small_time_simulations(df; t_end=100.0)
   end
   if remove_dup
     df = remove_duplicates(df)
