@@ -1,5 +1,5 @@
 using CairoMakie
-using CairoMakie: hidexdecorations!, linkxaxes!, linkyaxes!, LinearTicks, LineElement, MarkerElement
+using CairoMakie: hidexdecorations!, linkxaxes!, linkyaxes!, LinearTicks, LineElement, MarkerElement, IntervalsBetween
 using Printf
 using TTNEvo
 using NamedGraphs
@@ -17,137 +17,150 @@ using NetworkLayout
 using ColorSchemes
 using LaTeXStrings
 
-function plot_L12_comparison(
-    df::DataFrame;
-    h_values::NTuple{2, Real},
-    gridnum=nothing,
-    graph_types::Tuple{String,String}=("MPS", "TTN"),
-    target_dims::Dict{String,Int},
-    reference_dims::Dict{String,Int},
-    scale_factor::Real=1e5,
-)
-  palette = ColorSchemes.Zissou1Continuous.colors[[2, 9]]
-  label_map = Dict(
-    "MPS" => "MPS",
-    "TTN" => "TTN",
-  )
-  graph_alias = Dict(
-    "MPS" => "SnakeGraph",
-    "SnakeGraph" => "SnakeGraph",
-    "TTN" => "FreeGraph",
-    "FreeGraph" => "FreeGraph",
-  )
+function plot_L12_comparison(df::DataFrame; h_values, grid)
+  palette = ColorSchemes.Zissou1Continuous.colors[[1, 4, 8]]
 
-  label_for(name) = get(label_map, name, name)
+  mps = filter(x -> x.graph_type == "SnakeGraph" && x.graph_gridnum == grid, df)
+  ttn = filter(x -> x.graph_type == "FreeGraph" && x.graph_gridnum == grid, df)
 
-  function resolve_dim(dict::Dict{String,Int}, key::String, resolved::String)
-    if haskey(dict, key)
-      return dict[key]
-    elseif haskey(dict, resolved)
-      return dict[resolved]
-    else
-      error("Missing χ entry for $(key) (graph type $(resolved))")
-    end
-  end
-
-  function select_run(rows::DataFrame, χ::Int, context::String)
-    matches = filter(row -> row.initial_state_initial_maxdim == χ, rows)
-    isempty(matches) && error("Missing $(context) with χ = $(χ)")
-    return only(matches)
-  end
-
-  function accuracy_against_reference(run::DataFrameRow, reference::DataFrameRow)
-    return mean(abs.(reference.imbalance .- run.imbalance))
-  end
-
-  fig = Figure(size=(900, 450), fontsize=10)
-  imbalance_axes = Axis[]
+  fig = Figure(size=(600, length(h_values) * 200))
+  panel_letters = [Char('a' + mod(idx - 1, 26)) for idx in 1:(2*length(h_values))]
+  panel_idx = 1
+  axes_time = Axis[]
+  axes_error = Axis[]
 
   for (row_idx, h) in enumerate(h_values)
-    df_h = filter(row -> row.model_h == h && (gridnum === nothing || row.graph_gridnum == gridnum), df)
-    isempty(df_h) && error("No rows for h = $(h), gridnum = $(gridnum)")
-
-    for (col_idx, alias) in enumerate(graph_types)
-      graph_type = get(graph_alias, alias) do
-        error("Unknown graph identifier $(alias)")
-      end
-      df_type = filter(row -> row.graph_type == graph_type, df_h)
-      isempty(df_type) && error("No rows for graph_type = $(graph_type), h = $(h)")
-
-      target_dim = resolve_dim(target_dims, alias, graph_type)
-      reference_dim = resolve_dim(reference_dims, alias, graph_type)
-
-      target_run = select_run(df_type, target_dim, "$(alias) target")
-      reference_run = select_run(df_type, reference_dim, "$(alias) reference")
-
-      ax = Axis(fig[row_idx, col_idx],
-        ylabel=row_idx == 1 ? L"I(t)" : "",
-        xticks=LinearTicks(7),
-        limits=((0, 100), nothing))
-      row_idx == length(h_values) || hidexdecorations!(ax; grid=false)
-      ax.xlabel = row_idx == length(h_values) ? L"t" : ""
-
-      friendly = label_for(alias)
-      lines!(ax, target_run.times, target_run.imbalance;
-        color=palette[col_idx],
-        linewidth=1.8,
-        label="$(friendly), χ = $(target_run.initial_state_initial_maxdim)")
-
-      text!(ax, 0.05, 0.90, text=L"h = %$h", space=:relative,
-        align=(:left, :top))
-
-      if row_idx == 1
-        Label(fig[row_idx, col_idx], friendly; tellwidth=false, tellheight=false, padding=(0, 0, 4, 0))
-      end
-
-      push!(imbalance_axes, ax)
-
-      if row_idx == 1 && col_idx == length(graph_types)
-        axislegend(ax; position=:rt, framevisible=false)
-      end
+    ax = Axis(fig[row_idx, 1])
+    push!(axes_time, ax)
+    if row_idx == length(h_values)
+      ax.xlabel = L"t"
+    else
+      hidexdecorations!(ax, grid=false)
     end
-
-    acc_col = length(graph_types) + 1
-    ax_acc = Axis(fig[row_idx, acc_col],
-      xscale=log10,
-      yscale=log10,
-      xlabel=row_idx == length(h_values) ? L"N_{\mathrm{par}} / 10^{5}" : "",
-      ylabel=row_idx == 1 ? L"\varepsilon" : "")
-    row_idx == length(h_values) || hidexdecorations!(ax_acc; grid=false)
-
-    for (col_idx, alias) in enumerate(graph_types)
-      graph_type = graph_alias[alias]
-      df_type = filter(row -> row.graph_type == graph_type, df_h)
-      reference_dim = resolve_dim(reference_dims, alias, graph_type)
-      reference_run = select_run(df_type, reference_dim, "$(alias) reference")
-      dims = sort(unique(df_type.initial_state_initial_maxdim))
-      dims = filter(χ -> χ != reference_dim, dims)
-
-      errors = Float64[]
-      params = Float64[]
-
-      for χ in dims
-        run = select_run(df_type, χ, "$(alias) χ=$(χ)")
-        push!(errors, accuracy_against_reference(run, reference_run) + 1e-16)
-        push!(params, minimum(run.num_size) / scale_factor)
-      end
-
-      isempty(params) && continue
-      order = sortperm(params)
-      color = palette[col_idx]
-      friendly = label_for(alias)
-      lines!(ax_acc, params[order], errors[order]; color=color, linewidth=1.5)
-      marker = col_idx == 1 ? :circle : :diamond
-      scatter!(ax_acc, params[order], errors[order]; color=color, marker=marker,
-        label=friendly)
+    text!(ax, 0.05, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
+      align=(:left, :top), color=:black, fontsize=14)
+    text!(ax, 0.95, 0.95,
+      text=L"h=%$h",
+      align=(:right, :top),
+      fontsize=14,
+      space=:relative,
+    )
+    panel_idx += 1
+    h_mps = sort(filter(x -> x.model_h == h, mps), :initial_state_initial_maxdim)
+    h_ttn = sort(filter(x -> x.model_h == h, ttn), :initial_state_initial_maxdim)
+    for (series_idx, (m, t)) in enumerate(zip(eachrow(h_mps), eachrow(h_ttn)))
+      mps_label = (row_idx == 1 && series_idx == 1) ? "MPS" : nothing
+      ttn_label = (row_idx == 1 && series_idx == 1) ? "TTN" : nothing
+      lines!(ax, m.times, m.imbalance, color=palette[series_idx], linestyle=:dash, label=mps_label)
+      lines!(ax, t.times, t.imbalance, color=palette[series_idx], label=ttn_label)
     end
-
     if row_idx == 1
-      axislegend(ax_acc; position=:rt, framevisible=false)
+      axislegend(ax, position=:lt)
+    end
+
+    ref_mps = last(h_mps)
+    ref_ttn = last(h_ttn)
+
+    rest_mps = h_mps[1:(end-1), :]
+    rest_ttn = h_ttn[1:(end-1), :]
+
+    error_mps = []
+    error_ttn = []
+
+    mean_num_size_mps = []
+    mean_num_size_ttn = []
+
+    runtimes_mps = []
+    runtimes_ttn = []
+
+    for (rest_idx, (m, t)) in enumerate(zip(eachrow(rest_mps), eachrow(rest_ttn)))
+      min_len_mps = min(length(ref_mps.imbalance), length(m.imbalance))
+      @show min_len_mps
+      push!(error_mps, mean(abs.(ref_mps.imbalance[1:min_len_mps] .- m.imbalance[1:min_len_mps])))
+      min_len_ttn = min(length(ref_ttn.imbalance), length(t.imbalance))
+      push!(error_ttn, mean(abs.(ref_ttn.imbalance[1:min_len_ttn] .- t.imbalance[1:min_len_ttn])))
+      push!(mean_num_size_mps, mean(m.num_size))
+      push!(mean_num_size_ttn, mean(t.num_size))
+      push!(runtimes_mps, mean(m.ex_times))
+      push!(runtimes_ttn, mean(t.ex_times))
+    end
+
+    ax_err = Axis(fig[row_idx, 2], yscale=log10)
+    push!(axes_error, ax_err)
+    if row_idx == length(h_values)
+      ax_err.xlabel = L"N_{\mathrm{par}}"
+      ax_err.ylabel = L"\langle |I_{\chi_{\max}} - I_{\chi}| \rangle"
+    else
+      hidexdecorations!(ax_err, grid=false)
+    end
+    text!(ax_err, 0.05, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
+      align=(:left, :top), color=:black, fontsize=14)
+    panel_idx += 1
+
+    lines!(ax_err, mean_num_size_mps ./ 1e5, error_mps; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
+    lines!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
+    # scatter!(ax_err, mean_num_size_mps ./ 1e5, error_mps)
+    # scatter!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn)
+    @show maximum(runtimes_mps)
+    @show maximum(runtimes_ttn)
+
+    @show runtimes_mps
+    scatter!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn;
+      color=round.(runtimes_ttn),
+      colormap=default_colorscheme(),
+      colorrange=(20, 640),
+      # colorscale=log10,
+      marker=:circle,
+      markersize=8,
+      strokecolor=:black,
+      strokewidth=0.8,
+      label=row_idx == 1 ? "TTN" : nothing,
+    )
+    scatter!(ax_err, mean_num_size_mps ./ 1e5, error_mps;
+      color=round.(runtimes_mps),
+      colormap=default_colorscheme(),
+      colorrange=(20, 640),
+      # colorscale=log10,
+      marker=:rect,
+      markersize=8,
+      strokecolor=:black,
+      strokewidth=0.8,
+      label=row_idx == 1 ? "MPS" : nothing,
+    )
+    Colorbar(fig[row_idx, 3],
+      colormap=default_colorscheme(),
+      # scale=log10,
+      limits=(20, 640),
+      label=L"t_{\mathrm{ex}}",
+    )
+    if row_idx == 1
+      axislegend(ax_err, position=:lt)
+    end
+
+    combined_errors = filter(!iszero, vcat(error_mps, error_ttn))
+    if !isempty(combined_errors)
+      positive_errors = filter(>(0), combined_errors)
+      @show positive_errors
+      if !isempty(positive_errors)
+        if row_idx == 1
+          min_exp, max_exp = -3, -1
+        else
+          min_exp, max_exp = -4, -2
+        end
+        major_ticks = 10.0 .^ (min_exp:max_exp)
+        @show major_ticks
+        major_labels = [L"10^{%$k}" for k in min_exp:max_exp]
+        ylims!(ax_err, major_ticks[1], major_ticks[end] * 1.5)
+        ax_err.yticks = (major_ticks, major_labels)
+        ax_err.yminorticks = IntervalsBetween(9)
+        ax_err.yminorticksvisible = true
+      end
     end
   end
 
-  linkxaxes!(imbalance_axes...)
+  !isempty(axes_time) && linkxaxes!(axes_time...)
+  !isempty(axes_error) && linkxaxes!(axes_error...)
+
   display(fig)
   plots_dir = joinpath("plots", "paper")
   mkpath(plots_dir)
@@ -156,7 +169,7 @@ end
 
 function plot_L12_all_imbalances(df_in::DataFrame; h_values::AbstractVector, gridnum=nothing)
   palette = ColorSchemes.Zissou1Continuous.colors
-  palette = palette[[1, 4, 8, 11]]
+  palette = palette[[1, 4, 8]]
 
   fig_height = 400 * length(h_values)
   fig = Figure(size=(600, fig_height))

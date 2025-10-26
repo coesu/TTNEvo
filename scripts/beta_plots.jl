@@ -530,7 +530,7 @@ function plot_and_save_imbalance_fits(df::DataFrame, beta_df::DataFrame; chi=not
       mean_label = "mean imbalance"
       fit_label = "power-law fit"
 
-      fig = Figure(resolution=(640, 480))
+      fig = Figure(size=(640, 480))
       ax = Axis(fig[1, 1]; xlabel="t", ylabel="I(t)", title="χ=$(chi), L=$(L), h=$(round(h, digits=3))")
 
       traces = collect(df_group.imbalance)
@@ -807,7 +807,7 @@ function plot_all(df::DataFrame; dir="plots/beta_new")
     mkdir(dir)
   catch
   end
-  res = calculate_beta_with_time_window_error(df; starts=(30.0, 50.0))
+  res = calculate_beta_with_time_window_error(df; starts=(20.0, 50.0))
 
   fig = plot_hc_new_error(res)
   save(joinpath(dir, "hc_graph.pdf"), fig)
