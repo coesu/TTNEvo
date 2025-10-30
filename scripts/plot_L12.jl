@@ -18,7 +18,7 @@ using ColorSchemes
 using LaTeXStrings
 
 function plot_L12_comparison(df::DataFrame; h_values, grid)
-  palette = ColorSchemes.Zissou1Continuous.colors[[1, 4, 8]]
+  palette = ColorSchemes.Zissou1Continuous.colors[[1, 4, 8, 11]]
 
   mps = filter(x -> x.graph_type == "SnakeGraph" && x.graph_gridnum == grid, df)
   ttn = filter(x -> x.graph_type == "FreeGraph" && x.graph_gridnum == grid, df)
