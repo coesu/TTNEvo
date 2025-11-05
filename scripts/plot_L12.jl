@@ -169,7 +169,7 @@ end
 
 function plot_L12_all_imbalances(df_in::DataFrame; h_values::AbstractVector, gridnum=nothing)
   palette = ColorSchemes.Zissou1Continuous.colors
-  palette = palette[[1, 4, 8]]
+  palette = palette[[1, 4, 8, 11]]
 
   fig_height = 400 * length(h_values)
   fig = Figure(size=(600, fig_height))
@@ -222,4 +222,69 @@ function plot_L12_all_imbalances(df_in::DataFrame; h_values::AbstractVector, gri
 
   save(joinpath("plots", "paper", "L12_plot_all_imb.pdf"), fig)
   display(fig)
+end
+
+function load_ttn_32(
+  dir::AbstractString;
+  gridnums::Union{AbstractVector{<:Integer},Integer},
+  h_fields::Union{AbstractVector{<:Real},Real},
+  L::Int=12,
+  D::Union{Nothing,AbstractVector{<:Integer},Integer}=32,
+)
+  isdir(dir) || error("Directory not found: $(dir)")
+
+  files = filter(f -> endswith(f, ".jld2"), readdir(dir))
+  isempty(files) && return DataFrame()
+
+  grid_vec = gridnums isa AbstractVector ? collect(gridnums) : [gridnums]
+  h_vec = h_fields isa AbstractVector ? collect(h_fields) : [h_fields]
+  D_vec = D === nothing ? nothing : (D isa AbstractVector ? collect(D) : [D])
+
+  matched_files = String[]
+  for gridnum in grid_vec
+    for h_field in h_vec
+      h_string = @sprintf("%.2f", h_field)
+      prefix = "free_L=$(L)_gridnum=$(gridnum)_h=$(h_string)"
+      subset = filter(files) do file
+        occursin(prefix, file) &&
+          (D_vec === nothing || any(d -> occursin("_D=$(d)_", file), D_vec))
+      end
+      append!(matched_files, subset)
+    end
+  end
+
+  unique!(matched_files)
+
+  if isempty(matched_files)
+    @warn "No files matched requested parameters in $(dir)"
+    return DataFrame()
+  end
+
+  loaded_results = Vector{Any}()
+  for file in matched_files
+    filepath = joinpath(dir, file)
+    try
+      push!(loaded_results, load(filepath)["results"])
+    catch err
+      @warn "Failed to load file $(filepath)" exception = (err, catch_backtrace())
+    end
+  end
+
+  isempty(loaded_results) && return DataFrame()
+
+  df = DataFrame()
+  for result in loaded_results
+    flat = merge(result["parameters"], result["observables"])
+    push!(df, flat, cols=:union)
+  end
+
+  df.imbalance = TTNEvo.columnar_imbalance_total.(df.sz)
+  select!(df, Not([:maxdim, :sz]))
+  return df
+end
+
+function load_L12_new()
+  df12 = load_choose_dirs(; remove_small_time=false, load_from="L12-new")
+  df = load_ttn_32("data/L12-column-tree-beta-pre-det/"; gridnums=[2, 3], h_fields=[10.0, 20.0, 30.0])
+  return vcat(df, df12)
 end

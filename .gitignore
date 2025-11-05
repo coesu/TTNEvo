@@ -1,3 +1,9 @@
 data/
 plots/
 test/
+__pycache__/
+*.pkl
+*.csv
+.julia/
+*.jld2
+*.txt
