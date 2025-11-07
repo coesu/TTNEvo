@@ -98,6 +98,7 @@ def load_subset_data(filepath: str, convert_arrays_to_numpy: bool = False,
                 parsed = parse_row(line)
                 arrays = parsed['arrays']
                 scalars = parsed['scalars']
+                print(scalars)
 
                 # Create row data - first columns are arrays
                 row = {}
@@ -125,6 +126,7 @@ def load_subset_data(filepath: str, convert_arrays_to_numpy: bool = False,
 
         if verbose:
             print(f"Successfully loaded {line_count} rows")
+
 
     return pd.DataFrame(rows)
 
@@ -300,6 +302,7 @@ def convert_csv_to_fast_format(csv_path: Union[str, Path],
 
     # Load from CSV (slow)
     df = load_subset_data(csv_path, convert_arrays_to_numpy=True, verbose=verbose)
+    print(df.columns)
 
     # Save to requested formats
     if output_pickle:

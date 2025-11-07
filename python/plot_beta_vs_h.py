@@ -77,7 +77,7 @@ def main() -> None:
         output_path=args.output_dir / "beta_vs_h_bootstrap.png",
         title="β vs h (bootstrap mean +/- sigma)",
         show_fit=True,
-        fit_thresholds=(0.01, 0.005),
+        fit_thresholds=(0.01, 0.005, 0.001),
     )
     print(f"Saved plots to: {args.output_dir}")
 

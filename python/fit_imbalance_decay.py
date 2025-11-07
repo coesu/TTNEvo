@@ -416,7 +416,6 @@ def plot_beta_vs_h(
         )
 
         label_prefix = f"L={int(L)}"
-        label_segments: list[str] = []
         scatter_points: list[Tuple[float, float, float]] = []
         fit_res = None
 
@@ -441,9 +440,6 @@ def plot_beta_vs_h(
                             threshold, (float("nan"), float("nan"))
                         )
                         if np.isfinite(crossing) and crossing > 0:
-                            label_segments.append(
-                                f"h@β={threshold:.3f}={crossing:.1f}+/-{crossing_err:.1f}"
-                            )
                             scatter_points.append((threshold, crossing, crossing_err))
 
         # Log scale requires strictly positive values; filter accordingly.
@@ -468,9 +464,6 @@ def plot_beta_vs_h(
             capsize=3,
         )
         color = eb[0].get_color()
-
-        if label_segments:
-            eb[0].set_label(f"{label_prefix} ({'; '.join(label_segments)})")
 
         if show_fit and fit_res:
             h_min = np.min(subset_all["h"])
@@ -506,8 +499,15 @@ def plot_beta_vs_h(
     ax.set_ylabel("β")
     ax.set_title(title)
     ax.set_yscale("log")
+    ax.set_ylim(bottom=1e-3)
     ax.grid(True, ls="--", alpha=0.3)
-    ax.legend(title="System size", fontsize=8)
+    ax.legend(
+        title="System size",
+        fontsize=9,
+        title_fontsize=10,
+        frameon=False,
+        loc="best",
+    )
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=200)

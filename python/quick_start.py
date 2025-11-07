@@ -31,6 +31,8 @@ df = load_from_pickle("../subset_data.pkl")
 print(f"Loaded {len(df)} rows")
 print(f"Columns: {df.columns.tolist()}")
 
+print(df["t_ex"])
+
 # Example: Get specific parameter combinations
 subset = filter_by_params(df, L=10.0, h=15.0)
 print(f"\nFiltered to L=10, h=15: {len(subset)} rows")
@@ -45,7 +47,23 @@ print(f"  First 5 time points: {row['t'][:5]}")
 
 # Example: Iterate and analyze
 print(f"\nExample analysis:")
-for idx, row in subset.iloc[:3].iterrows():
-    max_imb = row['imb'].max()
-    min_imb = row['imb'].min()
-    print(f"  grid={row['grid']:3.0f}: imbalance range [{min_imb:.3f}, {max_imb:.3f}]")
+for idx, row in subset.iterrows():
+    max_imb = row["imb"].max()
+    min_imb = row["imb"].min()
+    mean_tex = float(row["t_ex"].mean())
+    print(
+        f"  grid={row['grid']:3.0f}: imbalance range [{min_imb:.3f}, {max_imb:.3f}], "
+        f"mean t_ex={mean_tex:.3f}"
+    )
+
+# Mean t_ex for every disorder and averaged over grids
+print("\nMean t_ex per disorder (grid) grouped by (L, h):")
+tex_per_grid = df.copy()
+tex_per_grid["mean_t_ex"] = tex_per_grid["t_ex"].apply(lambda arr: float(arr.mean()))
+
+for (L, h), group in tex_per_grid.groupby(["L", "h"], sort=True):
+    print(f"L={int(L):2d}, h={int(h):2d}")
+    # for _, row in group.iterrows():
+    #     print(f"  grid={row['grid']:3.0f}: mean t_ex={row['mean_t_ex']:.6f}")
+    mean_over_grids = group["mean_t_ex"].mean()
+    print(f"  average over grids: {mean_over_grids:.6f}\n")

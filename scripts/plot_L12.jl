@@ -1,5 +1,5 @@
 using CairoMakie
-using CairoMakie: hidexdecorations!, linkxaxes!, linkyaxes!, LinearTicks, LineElement, MarkerElement, IntervalsBetween
+using CairoMakie: hidexdecorations!, linkxaxes!, linkyaxes!, LinearTicks, LineElement, MarkerElement, IntervalsBetween, Legend
 using Printf
 using TTNEvo
 using NamedGraphs
@@ -23,39 +23,65 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
   mps = filter(x -> x.graph_type == "SnakeGraph" && x.graph_gridnum == grid, df)
   ttn = filter(x -> x.graph_type == "FreeGraph" && x.graph_gridnum == grid, df)
 
-  fig = Figure(size=(600, length(h_values) * 200))
+  fig = Figure(size=(600, length(h_values) * 150), fontsize=9)
   panel_letters = [Char('a' + mod(idx - 1, 26)) for idx in 1:(2*length(h_values))]
   panel_idx = 1
   axes_time = Axis[]
   axes_error = Axis[]
+  labeled_dims = Set{Int}()
+  maxdim_elements = LineElement[]
+  maxdim_labels = LaTeXString[]
 
   for (row_idx, h) in enumerate(h_values)
+    h = Int(h)
     ax = Axis(fig[row_idx, 1])
     push!(axes_time, ax)
+    ax.ylabel = L"I(t)"
     if row_idx == length(h_values)
       ax.xlabel = L"t"
     else
       hidexdecorations!(ax, grid=false)
     end
     text!(ax, 0.05, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
-      align=(:left, :top), color=:black, fontsize=14)
+      align=(:left, :top), color=:black, fontsize=9)
     text!(ax, 0.95, 0.95,
       text=L"h=%$h",
       align=(:right, :top),
-      fontsize=14,
+      fontsize=9,
       space=:relative,
     )
     panel_idx += 1
     h_mps = sort(filter(x -> x.model_h == h, mps), :initial_state_initial_maxdim)
     h_ttn = sort(filter(x -> x.model_h == h, ttn), :initial_state_initial_maxdim)
     for (series_idx, (m, t)) in enumerate(zip(eachrow(h_mps), eachrow(h_ttn)))
-      mps_label = (row_idx == 1 && series_idx == 1) ? "MPS" : nothing
-      ttn_label = (row_idx == 1 && series_idx == 1) ? "TTN" : nothing
-      lines!(ax, m.times, m.imbalance, color=palette[series_idx], linestyle=:dash, label=mps_label)
-      lines!(ax, t.times, t.imbalance, color=palette[series_idx], label=ttn_label)
+      dim = m.initial_state_initial_maxdim
+      color = palette[series_idx]
+      dim_label = (row_idx == 1 && !(dim in labeled_dims)) ? L"\chi = %$dim" : nothing
+      if dim_label !== nothing
+        push!(labeled_dims, dim)
+        push!(maxdim_elements, LineElement(color=color, linestyle=:solid, linewidth=1))
+        push!(maxdim_labels, dim_label)
+      end
+      lines!(ax, m.times, m.imbalance, color=color, linewidth=1, linestyle=:dash)
+      lines!(ax, t.times, t.imbalance, color=color, linewidth=1, label=dim_label)
     end
     if row_idx == 1
-      axislegend(ax, position=:lt)
+      legend_grid = GridLayout(tellwidth=false, tellheight=true)
+      fig[row_idx, 1, Top()] = legend_grid
+
+      Legend(legend_grid[1, 1],
+        [LineElement(color=:black, linestyle=:solid, linewidth=1),
+          LineElement(color=:black, linestyle=:dash, linewidth=1)],
+        ["TTN", "MPS"];
+        orientation=:vertical, framevisible=false, padding=(0, 0, -23, 0),
+        labelsize=8, patchsize=(12, 8), halign=:center)
+
+      if !isempty(maxdim_elements)
+        Legend(legend_grid[1, 2],
+          maxdim_elements, maxdim_labels;
+          orientation=:vertical, framevisible=false, padding=(0, 0, -45, 0),
+          labelsize=8, patchsize=(12, 8), halign=:center)
+      end
     end
 
     ref_mps = last(h_mps)
@@ -87,28 +113,24 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
 
     ax_err = Axis(fig[row_idx, 2], yscale=log10)
     push!(axes_error, ax_err)
+    ax_err.ylabel = L"|I_{\chi_{\max}} - I_{\chi}|"
     if row_idx == length(h_values)
       ax_err.xlabel = L"N_{\mathrm{par}}"
-      ax_err.ylabel = L"\langle |I_{\chi_{\max}} - I_{\chi}| \rangle"
     else
       hidexdecorations!(ax_err, grid=false)
     end
-    text!(ax_err, 0.05, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
-      align=(:left, :top), color=:black, fontsize=14)
+    text!(ax_err, 0.95, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
+      align=(:right, :top), color=:black, fontsize=9)
     panel_idx += 1
 
     lines!(ax_err, mean_num_size_mps ./ 1e5, error_mps; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
     lines!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
-    # scatter!(ax_err, mean_num_size_mps ./ 1e5, error_mps)
-    # scatter!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn)
-    @show maximum(runtimes_mps)
-    @show maximum(runtimes_ttn)
 
-    @show runtimes_mps
+    colorbarmax = 400
     scatter!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn;
       color=round.(runtimes_ttn),
       colormap=default_colorscheme(),
-      colorrange=(20, 640),
+      colorrange=(20, colorbarmax),
       # colorscale=log10,
       marker=:circle,
       markersize=8,
@@ -119,7 +141,7 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
     scatter!(ax_err, mean_num_size_mps ./ 1e5, error_mps;
       color=round.(runtimes_mps),
       colormap=default_colorscheme(),
-      colorrange=(20, 640),
+      colorrange=(20, colorbarmax),
       # colorscale=log10,
       marker=:rect,
       markersize=8,
@@ -130,11 +152,19 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
     Colorbar(fig[row_idx, 3],
       colormap=default_colorscheme(),
       # scale=log10,
-      limits=(20, 640),
+      limits=(20, colorbarmax),
       label=L"t_{\mathrm{ex}}",
     )
     if row_idx == 1
-      axislegend(ax_err, position=:lt)
+      legend_grid_err = GridLayout(tellwidth=false, tellheight=true)
+      fig[row_idx, 2, Top()] = legend_grid_err
+
+      Legend(legend_grid_err[1, 1],
+        [MarkerElement(marker=:circle, markersize=6, color=:black, strokecolor=:black, strokewidth=0.8),
+          MarkerElement(marker=:rect, markersize=6, color=:black, strokecolor=:black, strokewidth=0.8)],
+        ["TTN", "MPS"];
+        orientation=:vertical, framevisible=false, padding=(0, 0, -23, 0),
+        labelsize=8, patchsize=(12, 8), halign=:center)
     end
 
     combined_errors = filter(!iszero, vcat(error_mps, error_ttn))
@@ -161,6 +191,9 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
   !isempty(axes_time) && linkxaxes!(axes_time...)
   !isempty(axes_error) && linkxaxes!(axes_error...)
 
+  colsize!(fig.layout, 1, Relative(0.6))
+  colsize!(fig.layout, 2, Relative(0.4))
+
   display(fig)
   plots_dir = joinpath("plots", "paper")
   mkpath(plots_dir)
@@ -172,7 +205,7 @@ function plot_L12_all_imbalances(df_in::DataFrame; h_values::AbstractVector, gri
   palette = palette[[1, 4, 8, 11]]
 
   fig_height = 400 * length(h_values)
-  fig = Figure(size=(600, fig_height))
+  fig = Figure(size=(700, fig_height))
 
   axes = Axis[]
 
@@ -213,7 +246,7 @@ function plot_L12_all_imbalances(df_in::DataFrame; h_values::AbstractVector, gri
       padding=(6, 6, 6, 6))
 
     text!(ax, 0.05, 0.95, text=L"$L = 12$, $h = %$h$", space=:relative,
-      align=(:left, :top), color=:black, fontsize=14)
+      align=(:left, :top), color=:black, fontsize=9)
 
     push!(axes, ax)
   end

@@ -12,6 +12,10 @@ CSV_FILE = "../subset_data.csv"
 PICKLE_FILE = "../subset_data.pkl"
 PARQUET_FILE = "../subset_data.parquet"
 
+CSV_FILE = "../df12.csv"
+PICKLE_FILE = "../df12.pkl"
+PARQUET_FILE = "../df12.parquet"
+
 if __name__ == "__main__":
     print("Converting subset_data.csv to fast-loading formats...")
     print(f"Input:  {CSV_FILE}")
@@ -37,6 +41,7 @@ if __name__ == "__main__":
         output_parquet=PARQUET_FILE if use_parquet else None,
         verbose=True
     )
+    print(df.columns)
 
     total_time = time.time() - start
     print(f"\nTotal conversion time: {total_time:.1f} seconds")

@@ -2,7 +2,7 @@ using ITensorNetworks: inner, contraction_sequence, ⊗, expect, dag, siteinds, 
 using ITensorNetworks: AbstractTreeTensorNetwork
 using ITensors
 
-L = [12]
+L = [4, 6, 8, 10, 12]
 # h = [10.0, 20.0, 30.0]
 h = 5:5:50
 
@@ -15,7 +15,7 @@ maxdim = [32]
 cutoff = [1e-12]
 nsite = [1]
 qns = [false]
-grid_number = collect(1:100)
+grid_number = collect(101:200)
 
 init_state = [:columnar_neel]
 initial_maxdim = [2]
