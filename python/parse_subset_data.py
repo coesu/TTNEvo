@@ -114,7 +114,7 @@ def parse_subset_data(filepath: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
     # Parse the file
-    filepath = "/home/lars/Syncthing/master-thesis/TTNEvo/subset_data.csv"
+    filepath = "/home/lars/Syncthing/master-thesis/TTNEvo/data_beta.csv"
     df = parse_subset_data(filepath)
 
     print(f"\nDataFrame shape: {df.shape}")

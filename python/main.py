@@ -30,8 +30,8 @@ from plot_h_vs_L import plot_thresholds_vs_L, DEFAULT_THRESHOLDS as H_THRESHOLDS
 PYTHON_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PYTHON_DIR.parent
 
-SUBSET_PKL = PROJECT_ROOT / "subset_data.pkl"
-AVERAGED_PKL = PROJECT_ROOT / "subset_data_averaged.pkl"
+SUBSET_PKL = PROJECT_ROOT / "data_beta.pkl"
+AVERAGED_PKL = PROJECT_ROOT / "data_beta_averaged.pkl"
 
 TABLE_DIR = PYTHON_DIR / "plots" / "beta_decay" / "tables"
 TABLE_DIR.mkdir(parents=True, exist_ok=True)

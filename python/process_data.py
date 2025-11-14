@@ -42,6 +42,18 @@ def average_over_disorder(df: pd.DataFrame,
         print(f"Input: {len(df)} rows")
 
     # Group by all parameters except grid
+    rename_map = {
+        'times' : 't',
+        'graph_L': 'L',
+        'ex_times': 't_ex',
+        'imbalance': 'imb',
+        'model_h': 'h',
+        'initial_state_initial_maxdim': 'maxdim',
+        'graph_gridnum': 'grid',
+    }
+
+    df = df.rename(columns=rename_map)
+    print(df.head)
     grouped = df.groupby(['L', 'h', 'maxdim'])
 
     results = []
@@ -103,7 +115,7 @@ def average_over_disorder(df: pd.DataFrame,
 
 
 def save_averaged_data(df_averaged: pd.DataFrame,
-                       filepath: str = "../subset_data_averaged.pkl",
+                       filepath: str = "../data_beta_averaged.pkl",
                        verbose: bool = True) -> None:
     """
     Save averaged data to pickle file for fast loading.
@@ -121,7 +133,7 @@ def save_averaged_data(df_averaged: pd.DataFrame,
         print(f"Saved averaged data to: {filepath} ({size_mb:.1f} MB)")
 
 
-def load_averaged_data(filepath: str = "../subset_data_averaged.pkl",
+def load_averaged_data(filepath: str = "../data_beta_averaged.pkl",
                       verbose: bool = True) -> pd.DataFrame:
     """
     Load pre-averaged data from pickle file.
@@ -175,7 +187,8 @@ if __name__ == "__main__":
 
     # Load original data
     print("Step 1: Loading original data...")
-    df = load_from_pickle("../subset_data.pkl", verbose=False)
+    df = load_from_pickle("../data_beta.pkl", verbose=False)
+    print(df)
     print(f"Loaded {len(df)} rows with {df['grid'].nunique()} unique grid values")
     print()
 

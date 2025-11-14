@@ -8,13 +8,13 @@ import time
 from load_subset_data import convert_csv_to_fast_format, load_from_pickle, load_from_parquet
 
 # Configuration
-CSV_FILE = "../subset_data.csv"
-PICKLE_FILE = "../subset_data.pkl"
-PARQUET_FILE = "../subset_data.parquet"
+CSV_FILE = "../data_beta.csv"
+PICKLE_FILE = "../data_beta.pkl"
+PARQUET_FILE = "../data_beta.parquet"
 
-CSV_FILE = "../df12.csv"
-PICKLE_FILE = "../df12.pkl"
-PARQUET_FILE = "../df12.parquet"
+# CSV_FILE = "../df12.csv"
+# PICKLE_FILE = "../df12.pkl"
+# PARQUET_FILE = "../df12.parquet"
 
 if __name__ == "__main__":
     print("Converting subset_data.csv to fast-loading formats...")

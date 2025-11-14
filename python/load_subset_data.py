@@ -306,7 +306,7 @@ def convert_csv_to_fast_format(csv_path: Union[str, Path],
 
     # Save to requested formats
     if output_pickle:
-        print()
+        print(df)
         save_to_pickle(df, output_pickle)
 
     if output_parquet:
