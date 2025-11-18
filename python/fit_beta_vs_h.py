@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from fit_imbalance_decay import PLOT_DIR_DEFAULT, fit_beta_curve_lm
+from fit_imbalance_decay import ALLOWED_H_BY_L, PLOT_DIR_DEFAULT, fit_beta_curve_lm
 
 THRESHOLD_VALUES = (0.01, 0.005)
 
@@ -83,6 +83,11 @@ def compute_threshold_summary(
     records = []
     for L_value in sorted(df["L"].unique()):
         subset = df[df["L"] == L_value].copy()
+
+        allowed_h = ALLOWED_H_BY_L.get(int(L_value))
+        if allowed_h is not None:
+            subset = subset[subset["h"].isin(allowed_h)]
+
         if hmin is not None:
             subset = subset[subset["h"] >= hmin]
         if hmax is not None:

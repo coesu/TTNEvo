@@ -807,7 +807,7 @@ function plot_all(df::DataFrame; dir="plots/beta_new")
     mkdir(dir)
   catch
   end
-  res = calculate_beta_with_time_window_error(df; starts=(45.0, 50.0))
+  res = calculate_beta_with_time_window_error(df; starts=(20.0, 50.0))
 
   fig = plot_hc_new_error(res)
   save(joinpath(dir, "hc_graph.pdf"), fig)

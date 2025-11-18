@@ -3,7 +3,9 @@ Plot threshold fields h(β=β*) versus system size L using precomputed fits.
 
 This reads the CSV produced by ``fit_beta_vs_h.py`` (default location:
 ``plots/beta_decay/tables/beta_hc_estimates.csv``) and creates an error-bar plot
-showing how the field values where β reaches 0.010 and 0.005 depend on L.
+showing how the field values where β reaches 0.010 and 0.005 depend on L. It can
+optionally emit an additional figure displaying the mean h over all requested
+thresholds with propagated uncertainties.
 """
 from __future__ import annotations
 
@@ -12,9 +14,20 @@ from pathlib import Path
 from typing import Sequence, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.ticker import MultipleLocator
 
 DEFAULT_THRESHOLDS: Tuple[float, ...] = (0.01, 0.005)
+
+import matplotlib as mpl
+
+mpl.rcParams.update({
+  "text.usetex": True,          # route text through LaTeX
+  "font.family": "serif",       # LaTeX default
+  "font.serif": ["Computer Modern Roman"],
+  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
+})
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,6 +45,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("plots") / "beta_decay" / "h_vs_L.png",
         help="Output image file (PNG).",
+    )
+    parser.add_argument(
+        "--mean-output",
+        type=Path,
+        default=Path("plots") / "beta_decay" / "h_vs_L_mean.png",
+        help="Optional PNG for the mean-over-thresholds plot (omit by passing 'None').",
     )
     parser.add_argument(
         "--thresholds",
@@ -74,14 +93,86 @@ def plot_thresholds_vs_L(
             linewidth=1.2,
             capsize=4,
             color=color,
-            label=f"β = {threshold:.3f}",
+            label=rf"\beta = {threshold:.3f}",
         )
 
-    ax.set_xlabel("System size L")
-    ax.set_ylabel("Field h where β(h) meets threshold")
-    ax.set_title("Threshold fields vs system size")
+    ax.set_xlabel("L")
+    ax.set_ylabel(r"$h_c$")
+    ax.set_xticks([4, 6, 8, 10, 12])
+    ax.yaxis.set_major_locator(MultipleLocator(5))
     ax.grid(True, linestyle="--", alpha=0.3)
-    ax.legend(title="Threshold β")
+    # ax.legend(title=r"Threshold $\beta$")
+
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
+def plot_threshold_mean_vs_L(
+    df: pd.DataFrame,
+    thresholds: Sequence[float],
+    output_path: Path,
+) -> None:
+    """Plot the mean h field over all requested thresholds with propagated error."""
+    if not thresholds:
+        raise ValueError("At least one threshold is required to compute a mean plot.")
+
+    cols = []
+    for threshold in thresholds:
+        suffix = f"{threshold:.3f}".replace(".", "p")
+        value_col = f"h_beta_{suffix}"
+        err_col = f"h_beta_{suffix}_stderr"
+        if value_col not in df.columns:
+            raise ValueError(f"Column '{value_col}' missing; run fit_beta_vs_h.py for β={threshold:.3f}.")
+        cols.append((value_col, err_col))
+
+    mean_vals = []
+    mean_errs = []
+    for _, row in df.iterrows():
+        row_vals = []
+        for value_col, err_col in cols:
+            val = row.get(value_col)
+            if pd.notna(val):
+                row_vals.append(val)
+
+        n_vals = len(row_vals)
+        if n_vals:
+            mean_vals.append(float(sum(row_vals)) / n_vals)
+            min_val = min(row_vals)
+            max_val = max(row_vals)
+            lower_err = float(mean_vals[-1] - min_val)
+            upper_err = float(max_val - mean_vals[-1])
+            mean_errs.append([lower_err, upper_err])
+        else:
+            mean_vals.append(float("nan"))
+            mean_errs.append(float("nan"))
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    # Convert asymmetric errors to numpy array with shape (2, N)
+    yerr = []
+    for err in mean_errs:
+        if isinstance(err, list):
+            yerr.append(err)
+        else:
+            yerr.append([np.nan, np.nan])
+    yerr_arr = np.array(yerr).T if yerr else None
+
+    ax.errorbar(
+        df["L"],
+        mean_vals,
+        yerr=yerr_arr,
+        marker="o",
+        linestyle="-",
+        color="black",
+        linewidth=1.4,
+        capsize=4,
+    )
+    ax.set_xlabel("$L$")
+    ax.set_ylabel(r"$h_c$")
+    ax.set_xticks([4, 6, 8, 10, 12])
+    ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.grid(True, linestyle="--", alpha=0.3)
 
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,7 +184,12 @@ def main() -> None:
     args = parse_args()
     df = pd.read_csv(args.results)
     plot_thresholds_vs_L(df, thresholds=args.thresholds, output_path=args.output)
+    mean_output = args.mean_output
+    if mean_output and str(mean_output).lower() != "none":
+        plot_threshold_mean_vs_L(df, thresholds=args.thresholds, output_path=mean_output)
     print(f"Saved plot to: {args.output}")
+    if mean_output and str(mean_output).lower() != "none":
+        print(f"Saved mean plot to: {mean_output}")
 
 
 if __name__ == "__main__":

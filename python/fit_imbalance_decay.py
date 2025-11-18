@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from itertools import cycle
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -31,11 +32,24 @@ from scipy.optimize import curve_fit
 from process_data import load_averaged_data
 
 
-FIT_WINDOW_DEFAULT: Tuple[float, float] = (50.0, 100.0)
+FIT_WINDOW_DEFAULT: Tuple[float, float] = (30.0, 100.0)
 MIN_POINTS_DEFAULT: int = 10
 BOOTSTRAP_SAMPLES_DEFAULT: int = 10
 PLOT_DIR_DEFAULT = Path("plots") / "beta_decay"
 LM_BOOTSTRAP_SAMPLES_DEFAULT: int = 10
+
+# Allowed disorder strengths for each system size included in downstream β(h) analysis.
+ALLOWED_H_BY_L: Dict[int, Tuple[float, ...]] = {
+    4: (5, 10, 15, 20),
+    6: (5, 10, 15, 20, 25),
+    8: (5, 10, 15, 20, 25, 35),
+    10: (5, 10, 15,20, 25, 35),
+    12: (10, 15, 20, 25, 30, 35, 40),
+}
+
+PALETTE = ['#3A9AB2', '#A5C2A3', '#DCCB4E', '#E79805', '#F11B00']
+
+_H_MATCH_ATOL = 1e-6
 
 
 class FitError(RuntimeError):
@@ -58,6 +72,15 @@ class RegressionResult:
     def prefactor(self) -> float:
         """Return exp(intercept)."""
         return float(np.exp(self.intercept))
+
+
+def _is_allowed_h(L_value: float, h_value: float) -> bool:
+    """Return True when h is within the allowed set for this L (if any)."""
+    allowed = ALLOWED_H_BY_L.get(int(L_value))
+    if allowed is None:
+        return True
+
+    return any(math.isclose(h_value, allowed_h, abs_tol=_H_MATCH_ATOL) for allowed_h in allowed)
 
 
 def _select_fit_slice(
@@ -194,7 +217,7 @@ def bootstrap_beta(
 
     slopes = np.array(slopes)
     beta_samples = -slopes
-    return float(np.mean(beta_samples)), float(np.std(beta_samples, ddof=1))
+    return float(np.mean(beta_samples)), float(np.std(beta_samples, ddof=1) *2.)
 
 
 def fit_single_row(
@@ -333,7 +356,7 @@ def plot_fit(
         ax.loglog(
             times_window,
             fitted,
-            label=f"{label} fit (β={beta_val:.3f})",
+            label=rf"{label} fit (\beta={beta_val:.3f})",
         )
 
     ax.set_xlabel("Time t")
@@ -381,7 +404,7 @@ def plot_beta_heatmap(
     ax.set_ylabel("L")
     ax.set_title(title)
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("β")
+    cbar.set_label(r"$\beta$")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=200)
@@ -394,7 +417,7 @@ def plot_beta_vs_h(
     value_column: str,
     error_column: Optional[str] = None,
     output_path: Path,
-    title: str,
+    title: Optional[str]=None,
     show_fit: bool = False,
     fit_thresholds: Sequence[float] = (0.01, 0.005),
 ) -> None:
@@ -403,11 +426,30 @@ def plot_beta_vs_h(
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
     threshold_targets = [t for t in fit_thresholds if t > 0]
-    threshold_markers = {0.01: "s", 0.005: "D"}
-    threshold_legend_added = {t: False for t in threshold_targets}
+    threshold_windows: Dict[int, Dict[str, float]] = {}
+    target_L_values = [4, 6, 12]
+    available_L_values = set(df["L"].unique())
+    unique_L = [L for L in target_L_values if L in available_L_values]
+    if len(unique_L) == 3:
+        selected_colors = [PALETTE[0], PALETTE[len(PALETTE) // 2], PALETTE[-1]]
+    elif len(unique_L) <= len(PALETTE):
+        selected_colors = PALETTE[: len(unique_L)]
+    else:
+        color_cycle = cycle(PALETTE)
+        selected_colors = [next(color_cycle) for _ in unique_L]
 
-    for L in sorted(df["L"].unique()):
+    color_by_L = {
+        L_val: color for L_val, color in zip(unique_L, selected_colors, strict=False)
+    }
+
+    for L in unique_L:
         subset_all = df[df["L"] == L].sort_values("h")
+        allowed_h = ALLOWED_H_BY_L.get(int(L))
+        if allowed_h is not None:
+            subset_all = subset_all[subset_all["h"].isin(allowed_h)]
+
+        if subset_all.empty:
+            continue
         values_all = subset_all[value_column].to_numpy()
         errs_all = (
             subset_all[error_column].to_numpy()
@@ -416,8 +458,8 @@ def plot_beta_vs_h(
         )
 
         label_prefix = f"L={int(L)}"
-        scatter_points: list[Tuple[float, float, float]] = []
         fit_res = None
+        color = color_by_L[L]
 
         if show_fit:
             fit_mask = np.isfinite(values_all) & np.isfinite(subset_all["h"].to_numpy())
@@ -440,7 +482,24 @@ def plot_beta_vs_h(
                             threshold, (float("nan"), float("nan"))
                         )
                         if np.isfinite(crossing) and crossing > 0:
-                            scatter_points.append((threshold, crossing, crossing_err))
+                            err_val = (
+                                float(crossing_err)
+                                if np.isfinite(crossing_err) and crossing_err > 0
+                                else 0.0
+                            )
+                            lower = max(float(crossing) - err_val, 0.0)
+                            upper = float(crossing) + err_val
+
+                            window = threshold_windows.setdefault(
+                                L,
+                                {
+                                    "color": color,
+                                    "lower": float("inf"),
+                                    "upper": float("-inf"),
+                                },
+                            )
+                            window["lower"] = min(window["lower"], lower)
+                            window["upper"] = max(window["upper"], upper)
 
         # Log scale requires strictly positive values; filter accordingly.
         mask_plot = np.isfinite(values_all) & (values_all > 0)
@@ -454,16 +513,16 @@ def plot_beta_vs_h(
         y_vals = values_all[mask_plot]
         y_errs = errs_all[mask_plot] if errs_all is not None else None
 
-        eb = ax.errorbar(
+        ax.errorbar(
             x_vals,
             y_vals,
             yerr=y_errs,
             marker="o",
-            linestyle="-",
+            linestyle="none",
             label=label_prefix,
             capsize=3,
+            color=color,
         )
-        color = eb[0].get_color()
 
         if show_fit and fit_res:
             h_min = np.min(subset_all["h"])
@@ -476,33 +535,82 @@ def plot_beta_vs_h(
                     h_line[positive_mask],
                     beta_line[positive_mask],
                     color=color,
-                    linestyle="--",
+                    linestyle="-",
                     linewidth=1.2,
+                    label=f"{label_prefix} fit",
                 )
 
-            for threshold, crossing, _ in scatter_points:
-                scatter_label = None
-                if not threshold_legend_added.get(threshold, False):
-                    scatter_label = f"β={threshold:.3f} crossing"
-                    threshold_legend_added[threshold] = True
-                ax.scatter(
-                    [crossing],
-                    [threshold],
-                    marker=threshold_markers.get(threshold, "x"),
-                    color=color,
-                    s=35,
-                    label=scatter_label,
-                    zorder=5,
-                )
+                cov = fit_res.covariance
+                if cov is not None and cov.shape == (2, 2) and np.all(np.isfinite(cov)):
+                    # Var[log(beta)] = J Cov J^T with J = [h, 1]
+                    log_var = (
+                        cov[0, 0] * h_line**2
+                        + 2 * cov[0, 1] * h_line
+                        + cov[1, 1]
+                    )
+                    log_var = np.maximum(log_var, 0)
+                    sigma_beta = beta_line * np.sqrt(log_var)
+                    lower = np.clip(beta_line - sigma_beta, a_min=1e-12, a_max=None)
+                    upper = beta_line + sigma_beta
+                    ax.fill_between(
+                        h_line,
+                        lower,
+                        upper,
+                        where=positive_mask,
+                        color=color,
+                        alpha=0.18,
+                        linewidth=0,
+                    )
 
-    ax.set_xlabel("h")
-    ax.set_ylabel("β")
+    ax.set_xlabel("$h$")
+    ax.set_ylabel(r"$\beta$")
     ax.set_title(title)
     ax.set_yscale("log")
     ax.set_ylim(bottom=1e-3)
+    ax.tick_params(direction="in", which="both", top=False, right=False)
+    window_label_added = False
+    for L in unique_L:
+        window = threshold_windows.get(L)
+        if not window:
+            continue
+        lower = window.get("lower")
+        upper = window.get("upper")
+        if lower is None or upper is None:
+            continue
+        if not (np.isfinite(lower) and np.isfinite(upper)):
+            continue
+
+        color = window["color"]
+        label = r"$h_c$ range estimate" if not window_label_added else None
+        window_label_added = True
+
+        if upper > lower:
+            ax.axvline(
+                lower,
+                color=color,
+                linewidth=1.2,
+                linestyle="--",
+                alpha=0.8,
+                label=label,
+            )
+            ax.axvline(
+                upper,
+                color=color,
+                linewidth=1.2,
+                linestyle="--",
+                alpha=0.8,
+            )
+        else:
+            ax.axvline(
+                lower,
+                color=color,
+                linewidth=1.2,
+                linestyle="--",
+                alpha=0.8,
+                label=label,
+            )
     ax.grid(True, ls="--", alpha=0.3)
     ax.legend(
-        title="System size",
         fontsize=9,
         title_fontsize=10,
         frameon=False,
@@ -528,6 +636,8 @@ def main(
     failures = []
 
     for _, row in df.iterrows():
+        if not _is_allowed_h(row["L"], row["h"]):
+            continue
         try:
             res = fit_single_row(
                 row,
@@ -578,45 +688,44 @@ def main(
             results_df,
             "beta_unweighted",
             output_path=output_dir / "beta_unweighted_heatmap.png",
-            title="β (unweighted log-log fit)",
+            title=r"$\beta$ (unweighted log-log fit)",
         )
 
     if results_df["beta_weighted"].notna().any():
-        plot_beta_heatmap(
-            results_df,
-            "beta_weighted",
-            output_path=output_dir / "beta_weighted_heatmap.png",
-            title="β (weighted log-log fit)",
-        )
-        plot_beta_vs_h(
-            results_df,
-            value_column="beta_weighted",
-            error_column="beta_weighted_stderr",
-            output_path=output_dir / "beta_vs_h_weighted.png",
-            title="β vs h (weighted fits)",
-            show_fit=True,
-            fit_thresholds=(0.01, 0.005),
-        )
+        # plot_beta_heatmap(
+        #     results_df,
+        #     "beta_weighted",
+        #     output_path=output_dir / "beta_weighted_heatmap.png",
+        #     title=r"$\beta$ (weighted log-log fit)",
+        # )
+        # plot_beta_vs_h(
+        #     results_df,
+        #     value_column="beta_weighted",
+        #     error_column="beta_weighted_stderr",
+        #     output_path=output_dir / "beta_vs_h_weighted.png",
+        #     title=r"$\beta$ vs $h$ (weighted fits)",
+        #     show_fit=True,
+        #     fit_thresholds=(0.01, 0.005),
+        # )
         plot_beta_vs_h(
             results_df,
             value_column="beta_bootstrap_mean",
             error_column="beta_bootstrap_std",
             output_path=output_dir / "beta_vs_h_bootstrap.png",
-            title="β vs h (bootstrap mean +/- sigma)",
             show_fit=True,
             fit_thresholds=(0.01, 0.005),
         )
 
     if results_df["beta_unweighted"].notna().any():
-        plot_beta_vs_h(
-            results_df,
-            value_column="beta_unweighted",
-            error_column="beta_unweighted_stderr",
-            output_path=output_dir / "beta_vs_h_unweighted.png",
-            title="β vs h (unweighted fits)",
-            show_fit=True,
-            fit_thresholds=(0.01, 0.005),
-        )
+        # plot_beta_vs_h(
+        #     results_df,
+        #     value_column="beta_unweighted",
+        #     error_column="beta_unweighted_stderr",
+        #     output_path=output_dir / "beta_vs_h_unweighted.png",
+        #     show_fit=True,
+        #     fit_thresholds=(0.01, 0.005),
+        # )
+        pass
 
     return results_df
 

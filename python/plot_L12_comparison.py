@@ -22,7 +22,8 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator
 
 # Colour palette matching the Zissou1Continuous sample picked in the Julia code.
-PALETTE = ("#08306B", "#2879B9", "#4AC2C3", "#F2C14E")
+PALETTE = ['#3A9AB2', '#A5C2A3', '#DCCB4E', '#E79805', '#F11B00']
+
 COLORBAR_MIN = 20
 COLORBAR_MAX = 400
 

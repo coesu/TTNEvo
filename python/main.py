@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Callable
 
 import pandas as pd
 
@@ -25,7 +25,11 @@ from fit_imbalance_decay import (
     PLOT_DIR_DEFAULT,
 )
 from fit_beta_vs_h import compute_threshold_summary, THRESHOLD_VALUES
-from plot_h_vs_L import plot_thresholds_vs_L, DEFAULT_THRESHOLDS as H_THRESHOLDS
+from plot_h_vs_L import (
+    plot_thresholds_vs_L,
+    plot_threshold_mean_vs_L,
+    DEFAULT_THRESHOLDS as H_THRESHOLDS,
+)
 
 PYTHON_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PYTHON_DIR.parent
@@ -43,6 +47,8 @@ BOOTSTRAP_THRESHOLDS_CSV = TABLE_DIR / "beta_hc_bootstrap.csv"
 PLOT_DIR = PYTHON_DIR / "plots" / "beta_decay"
 H_VS_L_PNG = PLOT_DIR / "h_vs_L.png"
 H_VS_L_BOOT_PNG = PLOT_DIR / "h_vs_L_bootstrap.png"
+H_VS_L_MEAN_PNG = PLOT_DIR / "h_vs_L_mean.png"
+H_VS_L_BOOT_MEAN_PNG = PLOT_DIR / "h_vs_L_bootstrap_mean.png"
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,13 +156,16 @@ def ensure_h_vs_L_plot(
     reuse: bool,
     quiet: bool,
     thresholds: Sequence[float],
+    *,
+    plotter: Callable[[pd.DataFrame, Sequence[float], Path], None],
+    description: str,
 ) -> None:
     if reuse and output_path.exists():
-        print(f"[skip] Using existing h-vs-L figure: {output_path}")
+        print(f"[skip] Using existing {description} figure: {output_path}")
         return
 
-    print(f"[run] Rendering h(L) plot -> {output_path}")
-    plot_thresholds_vs_L(summary_df, thresholds=thresholds, output_path=output_path)
+    print(f"[run] Rendering {description} plot -> {output_path}")
+    plotter(summary_df, thresholds=thresholds, output_path=output_path)
     if quiet:
         print(f"[done] Saved {output_path}")
 
@@ -191,19 +200,41 @@ def main() -> None:
         quiet=args.quiet,
     )
 
-    ensure_h_vs_L_plot(
-        weighted_summary,
-        output_path=H_VS_L_PNG,
-        reuse=args.reuse_h_plots,
-        quiet=args.quiet,
-        thresholds=H_THRESHOLDS,
-    )
+    # ensure_h_vs_L_plot(
+    #     weighted_summary,
+    #     output_path=H_VS_L_PNG,
+    #     reuse=args.reuse_h_plots,
+    #     quiet=args.quiet,
+    #     thresholds=H_THRESHOLDS,
+    #     plotter=plot_thresholds_vs_L,
+    #     description="threshold h(L)",
+    # )
+    # ensure_h_vs_L_plot(
+    #     weighted_summary,
+    #     output_path=H_VS_L_MEAN_PNG,
+    #     reuse=args.reuse_h_plots,
+    #     quiet=args.quiet,
+    #     thresholds=H_THRESHOLDS,
+    #     plotter=plot_threshold_mean_vs_L,
+    #     description="mean threshold h(L)",
+    # )
+    # ensure_h_vs_L_plot(
+    #     bootstrap_summary,
+    #     output_path=H_VS_L_BOOT_PNG,
+    #     reuse=args.reuse_h_plots,
+    #     quiet=args.quiet,
+    #     thresholds=H_THRESHOLDS,
+    #     plotter=plot_thresholds_vs_L,
+    #     description="bootstrap threshold h(L)",
+    # )
     ensure_h_vs_L_plot(
         bootstrap_summary,
-        output_path=H_VS_L_BOOT_PNG,
+        output_path=H_VS_L_BOOT_MEAN_PNG,
         reuse=args.reuse_h_plots,
         quiet=args.quiet,
         thresholds=H_THRESHOLDS,
+        plotter=plot_threshold_mean_vs_L,
+        description="bootstrap mean threshold h(L)",
     )
 
     print("[done] Full analysis pipeline completed successfully.")

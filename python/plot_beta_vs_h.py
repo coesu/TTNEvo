@@ -52,30 +52,30 @@ def main() -> None:
 
     df = pd.read_csv(results_csv)
 
-    plot_beta_vs_h(
-        df,
-        value_column="beta_unweighted",
-        error_column="beta_unweighted_stderr",
-        output_path=args.output_dir / "beta_vs_h_unweighted.png",
-        title="β vs h (unweighted fits)",
-        show_fit=True,
-        fit_thresholds=(0.01, 0.005),
-    )
-    plot_beta_vs_h(
-        df,
-        value_column="beta_weighted",
-        error_column="beta_weighted_stderr",
-        output_path=args.output_dir / "beta_vs_h_weighted.png",
-        title="β vs h (weighted fits)",
-        show_fit=True,
-        fit_thresholds=(0.01, 0.005),
-    )
+    # plot_beta_vs_h(
+    #     df,
+    #     value_column="beta_unweighted",
+    #     error_column="beta_unweighted_stderr",
+    #     output_path=args.output_dir / "beta_vs_h_unweighted.png",
+    #     title=r"$\beta$ vs $h$ (unweighted fits)",
+    #     show_fit=True,
+    #     fit_thresholds=(0.01, 0.005),
+    # )
+    # plot_beta_vs_h(
+    #     df,
+    #     value_column="beta_weighted",
+    #     error_column="beta_weighted_stderr",
+    #     output_path=args.output_dir / "beta_vs_h_weighted.png",
+    #     title=r"$\beta$ vs $h$ (weighted fits)",
+    #     show_fit=True,
+    #     fit_thresholds=(0.01, 0.005),
+    # )
     plot_beta_vs_h(
         df,
         value_column="beta_bootstrap_mean",
         error_column="beta_bootstrap_std",
         output_path=args.output_dir / "beta_vs_h_bootstrap.png",
-        title="β vs h (bootstrap mean +/- sigma)",
+        # title=r"$\beta$ vs $h$ (bootstrap mean +/- sigma)",
         show_fit=True,
         fit_thresholds=(0.01, 0.005, 0.001),
     )
