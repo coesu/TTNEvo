@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--results",
         type=Path,
-        default=Path("plots") / "beta_decay" / "tables" / "beta_hc_estimates.csv",
+        default=Path("plots") / "beta_decay" / "tables" / "beta_hc_bootstrap.csv",
         help="CSV file containing threshold crossings from fit_beta_vs_h.py.",
     )
     parser.add_argument(
@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mean-output",
         type=Path,
-        default=Path("plots") / "beta_decay" / "h_vs_L_mean.png",
+        default=Path("plots") / "beta_decay" / "h_vs_L_bootstrap_mean.png",
         help="Optional PNG for the mean-over-thresholds plot (omit by passing 'None').",
     )
     parser.add_argument(
@@ -89,7 +89,7 @@ def plot_thresholds_vs_L(
             df[value_col],
             yerr=df.get(err_col),
             marker=markers[idx % len(markers)],
-            linestyle="-",
+            linestyle="none",
             linewidth=1.2,
             capsize=4,
             color=color,
@@ -100,6 +100,16 @@ def plot_thresholds_vs_L(
     ax.set_ylabel(r"$h_c$")
     ax.set_xticks([4, 6, 8, 10, 12])
     ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.set_ylim(top=35)
+    ax.tick_params(
+        axis="both",
+        which="both",
+        direction="in",
+        top=False,
+        right=False,
+        bottom=True,
+        left=True,
+    )
     ax.grid(True, linestyle="--", alpha=0.3)
     # ax.legend(title=r"Threshold $\beta$")
 
@@ -163,7 +173,7 @@ def plot_threshold_mean_vs_L(
         mean_vals,
         yerr=yerr_arr,
         marker="o",
-        linestyle="-",
+        linestyle="none",
         color="black",
         linewidth=1.4,
         capsize=4,
@@ -172,6 +182,16 @@ def plot_threshold_mean_vs_L(
     ax.set_ylabel(r"$h_c$")
     ax.set_xticks([4, 6, 8, 10, 12])
     ax.yaxis.set_major_locator(MultipleLocator(5))
+    ax.set_ylim(top=35)
+    ax.tick_params(
+        axis="both",
+        which="both",
+        direction="in",
+        top=False,
+        right=False,
+        bottom=True,
+        left=True,
+    )
     ax.grid(True, linestyle="--", alpha=0.3)
 
     fig.tight_layout()
@@ -183,11 +203,11 @@ def plot_threshold_mean_vs_L(
 def main() -> None:
     args = parse_args()
     df = pd.read_csv(args.results)
-    plot_thresholds_vs_L(df, thresholds=args.thresholds, output_path=args.output)
+    # plot_thresholds_vs_L(df, thresholds=args.thresholds, output_path=args.output)
     mean_output = args.mean_output
     if mean_output and str(mean_output).lower() != "none":
         plot_threshold_mean_vs_L(df, thresholds=args.thresholds, output_path=mean_output)
-    print(f"Saved plot to: {args.output}")
+    # print(f"Saved plot to: {args.output}")
     if mean_output and str(mean_output).lower() != "none":
         print(f"Saved mean plot to: {mean_output}")
 
