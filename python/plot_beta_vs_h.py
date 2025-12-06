@@ -20,6 +20,14 @@ from fit_imbalance_decay import (
     plot_beta_vs_h,
 )
 
+import matplotlib as mpl
+
+mpl.rcParams.update({
+  "text.usetex": True,          # route text through LaTeX
+  "font.family": "serif",       # LaTeX default
+  "font.serif": ["Computer Modern Roman"],
+  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
+})
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -74,10 +82,10 @@ def main() -> None:
         df,
         value_column="beta_bootstrap_mean",
         error_column="beta_bootstrap_std",
-        output_path=args.output_dir / "beta_vs_h_bootstrap.png",
+        output_path=args.output_dir / "beta_vs_h_bootstrap.pdf",
         # title=r"$\beta$ vs $h$ (bootstrap mean +/- sigma)",
         show_fit=True,
-        fit_thresholds=(0.01, 0.005, 0.001),
+        fit_thresholds=(0.01, 0.005),
     )
     print(f"Saved plots to: {args.output_dir}")
 

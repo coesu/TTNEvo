@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mean-output",
         type=Path,
-        default=Path("plots") / "beta_decay" / "h_vs_L_bootstrap_mean.png",
+        default=Path("plots") / "beta_decay" / "h_vs_L_bootstrap_mean.pdf",
         help="Optional PNG for the mean-over-thresholds plot (omit by passing 'None').",
     )
     parser.add_argument(
@@ -158,7 +158,7 @@ def plot_threshold_mean_vs_L(
             mean_vals.append(float("nan"))
             mean_errs.append(float("nan"))
 
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    fig, ax = plt.subplots(figsize=(4,3))
     # Convert asymmetric errors to numpy array with shape (2, N)
     yerr = []
     for err in mean_errs:

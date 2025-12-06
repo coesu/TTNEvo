@@ -2698,16 +2698,14 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   alphabet = 'a':'z'  # panel labels
 
   for (h_idx, h) in enumerate(h_values)
-    ax = Axis(grid[1, h_idx]; yscale=log10)
-    push!(axes, ax)
-
-    # add panel label (a), (b), (c) ...
-    text!(ax, 0.1, 0.05,
-      text="($(alphabet[h_idx]))",
-      align=(:left, :bottom),
-      fontsize=11,
-      space=:relative,
+    ax = Axis(
+      grid[1, h_idx];
+      yscale=log10,
+      title=L"(%$(alphabet[h_idx]))\enspace h=%$h",
+      titlealign=:left,
+      titlesize=9,
     )
+    push!(axes, ax)
 
     if L == 4
       ax.xticks = ([0, 0.5, 1])
@@ -2722,13 +2720,6 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
     if h_idx != 1
       hideydecorations!(ax, grid=false)
     end
-
-    text!(ax, 0.95, 0.95,
-      text=L"h=%$h",
-      align=(:right, :top),
-      fontsize=11,
-      space=:relative,
-    )
 
     for s in get(data_by_h, h, NamedTuple[])
       marker = marker_shapes[(s.type_idx-1)%length(marker_shapes)+1]

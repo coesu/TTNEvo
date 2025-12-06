@@ -31,6 +31,14 @@ from scipy.optimize import curve_fit
 
 from process_data import load_averaged_data
 
+import matplotlib as mpl
+
+mpl.rcParams.update({
+  "text.usetex": True,          # route text through LaTeX
+  "font.family": "serif",       # LaTeX default
+  "font.serif": ["Computer Modern Roman"],
+  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
+})
 
 FIT_WINDOW_DEFAULT: Tuple[float, float] = (30.0, 100.0)
 MIN_POINTS_DEFAULT: int = 10
@@ -317,7 +325,7 @@ def plot_fit(
     times_window = times[mask]
     imb_window = imbalance[mask]
 
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(4, 3))
 
     ax.loglog(times, imbalance, color="tab:blue", alpha=0.35, label="mean imbalance")
     ax.loglog(
@@ -424,7 +432,7 @@ def plot_beta_vs_h(
     """Plot beta vs h for each system size L."""
     _ensure_output_dir(output_path.parent)
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(4, 3))
     threshold_targets = [t for t in fit_thresholds if t > 0]
     threshold_windows: Dict[int, Dict[str, float]] = {}
     target_L_values = [4, 6, 12]

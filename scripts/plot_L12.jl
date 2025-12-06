@@ -34,7 +34,13 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
 
   for (row_idx, h) in enumerate(h_values)
     h = Int(h)
-    ax = Axis(fig[row_idx, 1])
+    panel_letter = panel_letters[panel_idx]
+    panel_idx += 1
+    ax = Axis(fig[row_idx, 1];
+      title=L"(%$(panel_letter))\enspace h=%$h",
+      titlealign=:left,
+      titlesize=9,
+    )
     push!(axes_time, ax)
     ax.ylabel = L"I(t)"
     if row_idx == length(h_values)
@@ -42,15 +48,6 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
     else
       hidexdecorations!(ax, grid=false)
     end
-    text!(ax, 0.05, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
-      align=(:left, :top), color=:black, fontsize=9)
-    text!(ax, 0.95, 0.95,
-      text=L"h=%$h",
-      align=(:right, :top),
-      fontsize=9,
-      space=:relative,
-    )
-    panel_idx += 1
     h_mps = sort(filter(x -> x.model_h == h, mps), :initial_state_initial_maxdim)
     h_ttn = sort(filter(x -> x.model_h == h, ttn), :initial_state_initial_maxdim)
     for (series_idx, (m, t)) in enumerate(zip(eachrow(h_mps), eachrow(h_ttn)))
@@ -73,13 +70,13 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
         [LineElement(color=:black, linestyle=:solid, linewidth=1),
           LineElement(color=:black, linestyle=:dash, linewidth=1)],
         ["TTN", "MPS"];
-        orientation=:vertical, framevisible=false, padding=(0, 0, -23, 0),
+        orientation=:vertical, framevisible=false, padding=(0, 0, -40, 0),
         labelsize=8, patchsize=(12, 8), halign=:center)
 
       if !isempty(maxdim_elements)
         Legend(legend_grid[1, 2],
           maxdim_elements, maxdim_labels;
-          orientation=:vertical, framevisible=false, padding=(0, 0, -45, 0),
+          orientation=:vertical, framevisible=false, padding=(0, 0, -60, 0),
           labelsize=8, patchsize=(12, 8), halign=:center)
       end
     end
@@ -111,17 +108,21 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
       push!(runtimes_ttn, mean(t.ex_times))
     end
 
-    ax_err = Axis(fig[row_idx, 2], yscale=log10)
+    panel_letter = panel_letters[panel_idx]
+    panel_idx += 1
+    ax_err = Axis(fig[row_idx, 2];
+      yscale=log10,
+      title=L"(%$(panel_letter))\enspace h=%$h",
+      titlealign=:left,
+      titlesize=9,
+    )
     push!(axes_error, ax_err)
     ax_err.ylabel = L"|I_{\chi_{\max}} - I_{\chi}|"
     if row_idx == length(h_values)
-      ax_err.xlabel = L"N_{\mathrm{par}}"
+      ax_err.xlabel = L"Number of parameters/$10^5$"
     else
       hidexdecorations!(ax_err, grid=false)
     end
-    text!(ax_err, 0.95, 0.95; text="($(panel_letters[panel_idx]))", space=:relative,
-      align=(:right, :top), color=:black, fontsize=9)
-    panel_idx += 1
 
     lines!(ax_err, mean_num_size_mps ./ 1e5, error_mps; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
     lines!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
@@ -153,7 +154,7 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
       colormap=default_colorscheme(),
       # scale=log10,
       limits=(20, colorbarmax),
-      label=L"t_{\mathrm{ex}}",
+      label="Execution time (s)",
     )
     if row_idx == 1
       legend_grid_err = GridLayout(tellwidth=false, tellheight=true)
@@ -163,7 +164,7 @@ function plot_L12_comparison(df::DataFrame; h_values, grid)
         [MarkerElement(marker=:circle, markersize=6, color=:black, strokecolor=:black, strokewidth=0.8),
           MarkerElement(marker=:rect, markersize=6, color=:black, strokecolor=:black, strokewidth=0.8)],
         ["TTN", "MPS"];
-        orientation=:vertical, framevisible=false, padding=(0, 0, -23, 0),
+        orientation=:vertical, framevisible=false, padding=(0, 0, -40, 0),
         labelsize=8, patchsize=(12, 8), halign=:center)
     end
 
