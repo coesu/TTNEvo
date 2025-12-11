@@ -424,15 +424,20 @@ def plot_beta_vs_h(
     *,
     value_column: str,
     error_column: Optional[str] = None,
-    output_path: Path,
-    title: Optional[str]=None,
+    output_path: Optional[Path] = None,
+    ax: Optional[plt.Axes] = None,
+    title: Optional[str] = None,
     show_fit: bool = False,
     fit_thresholds: Sequence[float] = (0.01, 0.005),
 ) -> None:
     """Plot beta vs h for each system size L."""
-    _ensure_output_dir(output_path.parent)
+    if output_path:
+        _ensure_output_dir(output_path.parent)
 
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig = None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4, 3))
+
     threshold_targets = [t for t in fit_thresholds if t > 0]
     threshold_windows: Dict[int, Dict[str, float]] = {}
     target_L_values = [4, 6, 12]
@@ -450,6 +455,7 @@ def plot_beta_vs_h(
         L_val: color for L_val, color in zip(unique_L, selected_colors, strict=False)
     }
 
+    fit_label_added = False # Added this line
     for L in unique_L:
         subset_all = df[df["L"] == L].sort_values("h")
         allowed_h = ALLOWED_H_BY_L.get(int(L))
@@ -539,14 +545,17 @@ def plot_beta_vs_h(
             beta_line = np.exp(fit_res.slope * h_line + fit_res.intercept)
             positive_mask = beta_line > 0
             if np.any(positive_mask):
+                fit_line_label = "Fit" if not fit_label_added else None
                 ax.plot(
                     h_line[positive_mask],
                     beta_line[positive_mask],
                     color=color,
                     linestyle="-",
                     linewidth=1.2,
-                    label=f"{label_prefix} fit",
+                    label=fit_line_label,
                 )
+                if fit_line_label is not None:
+                    fit_label_added = True
 
                 cov = fit_res.covariance
                 if cov is not None and cov.shape == (2, 2) and np.all(np.isfinite(cov)):
@@ -572,7 +581,8 @@ def plot_beta_vs_h(
 
     ax.set_xlabel("$h$")
     ax.set_ylabel(r"$\beta$")
-    ax.set_title(title)
+    if title:
+        ax.set_title(title)
     ax.set_yscale("log")
     ax.set_ylim(bottom=1e-3)
     ax.tick_params(direction="in", which="both", top=False, right=False)
@@ -625,9 +635,17 @@ def plot_beta_vs_h(
         loc="best",
     )
 
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
-    plt.close(fig)
+    if output_path:
+        # If we created the figure, we can save and close it.
+        # If ax was passed, we can still save the figure it belongs to, but we shouldn't close it.
+        if fig:
+            fig.tight_layout()
+            fig.savefig(output_path, dpi=200)
+            plt.close(fig)
+        else:
+            # We didn't create the figure, so just save it without closing.
+            # Assuming the caller will handle layout/closing.
+            ax.get_figure().savefig(output_path, dpi=200)
 
 
 def main(

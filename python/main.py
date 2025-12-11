@@ -30,6 +30,7 @@ from plot_h_vs_L import (
     plot_threshold_mean_vs_L,
     DEFAULT_THRESHOLDS as H_THRESHOLDS,
 )
+from combined_plots import plot_combined_beta_h_and_thresholds
 
 PYTHON_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PYTHON_DIR.parent
@@ -49,6 +50,8 @@ H_VS_L_PNG = PLOT_DIR / "h_vs_L.png"
 H_VS_L_BOOT_PNG = PLOT_DIR / "h_vs_L_bootstrap.png"
 H_VS_L_MEAN_PNG = PLOT_DIR / "h_vs_L_mean.png"
 H_VS_L_BOOT_MEAN_PNG = PLOT_DIR / "h_vs_L_bootstrap_mean.png"
+COMBINED_PLOT_PNG = PLOT_DIR / "beta_decay_combined.png"
+COMBINED_PLOT_PDF = PLOT_DIR / "beta_decay_combined.pdf"
 
 
 def parse_args() -> argparse.Namespace:
@@ -170,6 +173,29 @@ def ensure_h_vs_L_plot(
         print(f"[done] Saved {output_path}")
 
 
+def ensure_combined_plot(
+    beta_df: pd.DataFrame,
+    threshold_df: pd.DataFrame,
+    output_path: Path,
+    reuse: bool,
+    quiet: bool,
+    thresholds: Sequence[float] = H_THRESHOLDS,
+) -> None:
+    if reuse and output_path.exists():
+        print(f"[skip] Using existing combined plot: {output_path}")
+        return
+
+    print(f"[run] Rendering combined plot -> {output_path}")
+    plot_combined_beta_h_and_thresholds(
+        beta_df,
+        threshold_df,
+        output_path=output_path,
+        thresholds=thresholds,
+    )
+    if quiet:
+        print(f"[done] Saved {output_path}")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -235,6 +261,21 @@ def main() -> None:
         thresholds=H_THRESHOLDS,
         plotter=plot_threshold_mean_vs_L,
         description="bootstrap mean threshold h(L)",
+    )
+
+    ensure_combined_plot(
+        beta_df,
+        bootstrap_summary,
+        output_path=COMBINED_PLOT_PDF,
+        reuse=args.reuse_h_plots,
+        quiet=args.quiet,
+    )
+    ensure_combined_plot(
+        beta_df,
+        bootstrap_summary,
+        output_path=COMBINED_PLOT_PNG,
+        reuse=args.reuse_h_plots,
+        quiet=args.quiet,
     )
 
     print("[done] Full analysis pipeline completed successfully.")

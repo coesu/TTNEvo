@@ -7,6 +7,7 @@ showing how the field values where β reaches 0.010 and 0.005 depend on L. It ca
 optionally emit an additional figure displaying the mean h over all requested
 thresholds with propagated uncertainties.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,12 +23,31 @@ DEFAULT_THRESHOLDS: Tuple[float, ...] = (0.01, 0.005)
 
 import matplotlib as mpl
 
-mpl.rcParams.update({
-  "text.usetex": True,          # route text through LaTeX
-  "font.family": "serif",       # LaTeX default
-  "font.serif": ["Computer Modern Roman"],
-  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
-})
+plt.rcParams.update(
+    {
+        "pgf.texsystem": "pdflatex",
+        "font.family": "serif",
+        "text.usetex": True,
+        "pgf.preamble": r"\usepackage{amsmath, amsfonts}",  # Add any packages your LaTeX uses
+    }
+)
+
+FONT_SIZE = 10  # Adjust this to match your LaTeX base font size
+
+plt.rcParams.update(
+    {
+        "font.size": FONT_SIZE,  # Controls default text sizes
+        "axes.labelsize": FONT_SIZE,  # Font size of the x and y labels
+        "xtick.labelsize": FONT_SIZE,  # Font size of the x-axis tick labels
+        "ytick.labelsize": FONT_SIZE,  # Font size of the y-axis tick labels
+        "legend.fontsize": FONT_SIZE,  # Legend font size
+        "axes.titlesize": FONT_SIZE,  # Title font size (optional: make it slightly larger)
+        # Use the same font family as your LaTeX document for better matching
+        # If using pdflatex and standard fonts, often 'serif' or 'sans-serif' is fine
+        # For matching *exact* fonts, you might need to use 'Computer Modern' (cm)
+        "font.family": "serif",
+    }
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,7 +142,8 @@ def plot_thresholds_vs_L(
 def plot_threshold_mean_vs_L(
     df: pd.DataFrame,
     thresholds: Sequence[float],
-    output_path: Path,
+    output_path: Optional[Path] = None,
+    ax: Optional[plt.Axes] = None,
 ) -> None:
     """Plot the mean h field over all requested thresholds with propagated error."""
     if not thresholds:
@@ -134,7 +155,9 @@ def plot_threshold_mean_vs_L(
         value_col = f"h_beta_{suffix}"
         err_col = f"h_beta_{suffix}_stderr"
         if value_col not in df.columns:
-            raise ValueError(f"Column '{value_col}' missing; run fit_beta_vs_h.py for β={threshold:.3f}.")
+            raise ValueError(
+                f"Column '{value_col}' missing; run fit_beta_vs_h.py for β={threshold:.3f}."
+            )
         cols.append((value_col, err_col))
 
     mean_vals = []
@@ -158,7 +181,10 @@ def plot_threshold_mean_vs_L(
             mean_vals.append(float("nan"))
             mean_errs.append(float("nan"))
 
-    fig, ax = plt.subplots(figsize=(4,3))
+    fig = None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4, 3))
+
     # Convert asymmetric errors to numpy array with shape (2, N)
     yerr = []
     for err in mean_errs:
@@ -194,10 +220,14 @@ def plot_threshold_mean_vs_L(
     )
     ax.grid(True, linestyle="--", alpha=0.3)
 
-    fig.tight_layout()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=200)
-    plt.close(fig)
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if fig:
+            fig.tight_layout()
+            fig.savefig(output_path, dpi=200)
+            plt.close(fig)
+        else:
+            ax.get_figure().savefig(output_path, dpi=200)
 
 
 def main() -> None:
@@ -206,7 +236,9 @@ def main() -> None:
     # plot_thresholds_vs_L(df, thresholds=args.thresholds, output_path=args.output)
     mean_output = args.mean_output
     if mean_output and str(mean_output).lower() != "none":
-        plot_threshold_mean_vs_L(df, thresholds=args.thresholds, output_path=mean_output)
+        plot_threshold_mean_vs_L(
+            df, thresholds=args.thresholds, output_path=mean_output
+        )
     # print(f"Saved plot to: {args.output}")
     if mean_output and str(mean_output).lower() != "none":
         print(f"Saved mean plot to: {mean_output}")
