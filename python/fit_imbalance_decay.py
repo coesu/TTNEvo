@@ -31,15 +31,6 @@ from scipy.optimize import curve_fit
 
 from process_data import load_averaged_data
 
-import matplotlib as mpl
-
-mpl.rcParams.update({
-  "text.usetex": True,          # route text through LaTeX
-  "font.family": "serif",       # LaTeX default
-  "font.serif": ["Computer Modern Roman"],
-  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
-})
-
 FIT_WINDOW_DEFAULT: Tuple[float, float] = (30.0, 100.0)
 MIN_POINTS_DEFAULT: int = 10
 BOOTSTRAP_SAMPLES_DEFAULT: int = 10
@@ -373,7 +364,7 @@ def plot_fit(
         f"L={fit_params['L']:.0f}, h={fit_params['h']:.0f}; "
         f"fit window [{t_min:.0f}, {t_max:.0f}]"
     )
-    ax.legend(fontsize=8)
+    ax.legend()
     ax.grid(True, which="both", ls="--", alpha=0.3)
 
     fig.tight_layout()
@@ -629,9 +620,8 @@ def plot_beta_vs_h(
             )
     ax.grid(True, ls="--", alpha=0.3)
     ax.legend(
-        fontsize=9,
-        title_fontsize=10,
-        frameon=False,
+        frameon=True, # Show frame
+        framealpha=0.9, # Set alpha for the frame
         loc="best",
     )
 

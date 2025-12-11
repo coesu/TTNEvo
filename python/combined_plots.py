@@ -13,17 +13,6 @@ import pandas as pd
 from fit_imbalance_decay import plot_beta_vs_h
 from plot_h_vs_L import plot_threshold_mean_vs_L, DEFAULT_THRESHOLDS
 
-import matplotlib as mpl
-
-mpl.rcParams.update(
-    {
-        "text.usetex": True,  # route text through LaTeX
-        "font.family": "serif",  # LaTeX default
-        "font.serif": ["Computer Modern Roman"],
-        "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
-    }
-)
-
 
 def plot_combined_beta_h_and_thresholds(
     beta_df: pd.DataFrame,
@@ -37,7 +26,7 @@ def plot_combined_beta_h_and_thresholds(
     2. Mean threshold h vs L
     """
     # Create figure with 2 subplots vertically stacked
-    fig, axes = plt.subplots(2, 1, figsize=(5, 7))
+    fig, axes = plt.subplots(2, 1, figsize=(4, 6))
 
     # Subplot 1: Beta vs h
     # We use beta_df (results from fits) here.
@@ -55,7 +44,7 @@ def plot_combined_beta_h_and_thresholds(
     # Add (a) label
     axes[0].text(
         0.01,
-        1.07,
+        1.1,
         "(a)",
         transform=axes[0].transAxes,
         fontweight="bold",
@@ -74,7 +63,7 @@ def plot_combined_beta_h_and_thresholds(
     # Add (b) label
     axes[1].text(
         0.01,
-        1.07,
+        1.1,
         "(b)",
         transform=axes[1].transAxes,
         fontweight="bold",

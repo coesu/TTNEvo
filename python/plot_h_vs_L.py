@@ -21,34 +21,6 @@ from matplotlib.ticker import MultipleLocator
 
 DEFAULT_THRESHOLDS: Tuple[float, ...] = (0.01, 0.005)
 
-import matplotlib as mpl
-
-plt.rcParams.update(
-    {
-        "pgf.texsystem": "pdflatex",
-        "font.family": "serif",
-        "text.usetex": True,
-        "pgf.preamble": r"\usepackage{amsmath, amsfonts}",  # Add any packages your LaTeX uses
-    }
-)
-
-FONT_SIZE = 10  # Adjust this to match your LaTeX base font size
-
-plt.rcParams.update(
-    {
-        "font.size": FONT_SIZE,  # Controls default text sizes
-        "axes.labelsize": FONT_SIZE,  # Font size of the x and y labels
-        "xtick.labelsize": FONT_SIZE,  # Font size of the x-axis tick labels
-        "ytick.labelsize": FONT_SIZE,  # Font size of the y-axis tick labels
-        "legend.fontsize": FONT_SIZE,  # Legend font size
-        "axes.titlesize": FONT_SIZE,  # Title font size (optional: make it slightly larger)
-        # Use the same font family as your LaTeX document for better matching
-        # If using pdflatex and standard fonts, often 'serif' or 'sans-serif' is fine
-        # For matching *exact* fonts, you might need to use 'Computer Modern' (cm)
-        "font.family": "serif",
-    }
-)
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

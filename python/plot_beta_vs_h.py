@@ -20,14 +20,6 @@ from fit_imbalance_decay import (
     plot_beta_vs_h,
 )
 
-import matplotlib as mpl
-
-mpl.rcParams.update({
-  "text.usetex": True,          # route text through LaTeX
-  "font.family": "serif",       # LaTeX default
-  "font.serif": ["Computer Modern Roman"],
-  "text.latex.preamble": r"\usepackage{amsmath}",  # optional extras
-})
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

@@ -9,6 +9,7 @@ By default this script recomputes:
 
 Flags allow reusing pre-existing outputs to save time.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,6 +32,23 @@ from plot_h_vs_L import (
     DEFAULT_THRESHOLDS as H_THRESHOLDS,
 )
 from combined_plots import plot_combined_beta_h_and_thresholds
+
+import matplotlib as mpl
+
+mpl.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "text.latex.preamble": r"\usepackage{amsmath}",
+        "font.size": 11,
+        "axes.labelsize": 11,
+        "axes.titlesize": 11,
+        "legend.fontsize": 11,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+    }
+)
 
 PYTHON_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PYTHON_DIR.parent
