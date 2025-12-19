@@ -2609,7 +2609,6 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
   global_rt_min = Inf
   global_rt_max = -Inf
 
-  display(filter(row -> row.graph_L == L, df))
   for h in h_values
     series_list = NamedTuple[]
     df_h_filtered = filter(row -> row.graph_L == L && row.model_h == h, df)
@@ -2701,9 +2700,9 @@ function plot_params_runtime_colored_by_runtime(df::DataFrame; L::Int, dir)
     ax = Axis(
       grid[1, h_idx];
       yscale=log10,
-      title=L"(%$(alphabet[h_idx]))\enspace h=%$h",
+      title=L"(%$(alphabet[h_idx])) $h=%$h$",
       titlealign=:left,
-      titlesize=9,
+      titlesize=11,
     )
     push!(axes, ax)
 
@@ -2784,7 +2783,7 @@ end
 
 
 function multiplot_size()
-  return (500, 200)
+  return (600, 200)
 end
 
 
@@ -2797,7 +2796,7 @@ function plot_runtime_vs_parameters(df::DataFrame; L::Int, dir)
     return
   end
 
-  fig = Figure(size=multiplot_size(), fontsize=8pt)
+  fig = Figure(size=multiplot_size(), fontsize=11)
 
   # Outer layout: col 1 = shared ylabel, col 2 = plots grid
   scaling = 1e5
