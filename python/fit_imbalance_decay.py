@@ -16,6 +16,7 @@ uncertainties via two complementary approaches:
 
 Outputs include tabulated fit results and diagnostic plots.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,6 +31,7 @@ import pandas as pd
 from scipy.optimize import curve_fit
 
 from process_data import load_averaged_data
+from load_subset_data import load_from_pickle
 
 FIT_WINDOW_DEFAULT: Tuple[float, float] = (30.0, 100.0)
 MIN_POINTS_DEFAULT: int = 10
@@ -42,11 +44,11 @@ ALLOWED_H_BY_L: Dict[int, Tuple[float, ...]] = {
     4: (5, 10, 15, 20),
     6: (5, 10, 15, 20, 25),
     8: (5, 10, 15, 20, 25, 35),
-    10: (5, 10, 15,20, 25, 35),
+    10: (5, 10, 15, 20, 25, 35),
     12: (10, 15, 20, 25, 30, 35, 40),
 }
 
-PALETTE = ['#3A9AB2', '#A5C2A3', '#DCCB4E', '#E79805', '#F11B00']
+PALETTE = ["#3A9AB2", "#A5C2A3", "#DCCB4E", "#E79805", "#F11B00"]
 
 _H_MATCH_ATOL = 1e-6
 
@@ -79,7 +81,9 @@ def _is_allowed_h(L_value: float, h_value: float) -> bool:
     if allowed is None:
         return True
 
-    return any(math.isclose(h_value, allowed_h, abs_tol=_H_MATCH_ATOL) for allowed_h in allowed)
+    return any(
+        math.isclose(h_value, allowed_h, abs_tol=_H_MATCH_ATOL) for allowed_h in allowed
+    )
 
 
 def _select_fit_slice(
@@ -93,7 +97,9 @@ def _select_fit_slice(
     if t_min <= 0.0:
         raise ValueError("fit_window must start at positive time to avoid log(0).")
 
-    mask = (times >= t_min) & (times <= t_max) & np.isfinite(imbalance) & (imbalance > 0)
+    mask = (
+        (times >= t_min) & (times <= t_max) & np.isfinite(imbalance) & (imbalance > 0)
+    )
 
     if imbalance_sem is not None:
         mask &= np.isfinite(imbalance_sem)
@@ -216,7 +222,78 @@ def bootstrap_beta(
 
     slopes = np.array(slopes)
     beta_samples = -slopes
-    return float(np.mean(beta_samples)), float(np.std(beta_samples, ddof=1) *2.)
+    return float(np.mean(beta_samples)), float(np.std(beta_samples, ddof=1) * 2.0)
+
+
+def bootstrap_beta_from_raw(
+    times: np.ndarray,
+    imbalance_matrix: np.ndarray,
+    fit_window: Tuple[float, float],
+    *,
+    n_samples: int = BOOTSTRAP_SAMPLES_DEFAULT,
+    min_points: int = MIN_POINTS_DEFAULT,
+    random_state: Optional[int] = 17,
+) -> Tuple[float, float]:
+    """
+    Estimate beta uncertainty via resampling individual disorder realizations.
+
+    Args:
+        times: Array of time points (N_t,).
+        imbalance_matrix: Matrix of imbalance time series (N_realizations, N_t).
+        fit_window: (t_min, t_max) to fit over.
+        n_samples: Number of bootstrap iterations.
+        min_points: Minimum number of time points in window.
+        random_state: Seed for RNG.
+
+    Returns:
+        (mean_beta, std_beta)
+    """
+    n_realizations, n_times = imbalance_matrix.shape
+    if n_realizations < 2:
+        return float("nan"), float("nan")
+
+    # Filter time window once
+    t_min, t_max = fit_window
+    mask = (times >= t_min) & (times <= t_max)
+    if not np.any(mask):
+        return float("nan"), float("nan")
+
+    times_sel = times[mask]
+    imb_matrix_sel = imbalance_matrix[:, mask]
+
+    if times_sel.size < min_points:
+        return float("nan"), float("nan")
+
+    log_t = np.log(times_sel)
+    rng = np.random.default_rng(random_state)
+    slopes = []
+
+    for _ in range(n_samples):
+        # Resample realizations with replacement
+        indices = rng.integers(0, n_realizations, size=n_realizations)
+        # Compute mean curve of this resampled set
+        # axis 0 is realizations
+        mean_curve = np.mean(imb_matrix_sel[indices, :], axis=0)
+
+        # Guard against <= 0
+        valid = mean_curve > 0
+        if np.sum(valid) < min_points:
+            continue
+
+        log_imb = np.log(mean_curve[valid])
+        curr_log_t = log_t[valid]
+
+        # Unweighted fit on this synthetic mean curve
+        coeffs = np.polyfit(curr_log_t, log_imb, deg=1)
+        slopes.append(coeffs[0])
+
+    if not slopes:
+        return float("nan"), float("nan")
+
+    slopes = np.array(slopes)
+    beta_samples = -slopes
+    # Return mean and std (standard error of beta)
+    return float(np.mean(beta_samples)), float(np.std(beta_samples, ddof=1))
 
 
 def fit_single_row(
@@ -226,6 +303,7 @@ def fit_single_row(
     min_points: int = MIN_POINTS_DEFAULT,
     bootstrap_samples: int = BOOTSTRAP_SAMPLES_DEFAULT,
     random_state: Optional[int] = 17,
+    raw_data_subset: Optional[pd.DataFrame] = None,
 ) -> dict:
     """Compute fit results for one (L, h) parameter row."""
     times = np.asarray(row["t"], dtype=float)
@@ -262,7 +340,38 @@ def fit_single_row(
         )
 
     bootstrap_mean = bootstrap_std = math.nan
-    if sigma_log is not None and np.any(np.isfinite(sigma_log)):
+
+    # Prefer raw data resampling if available
+    if raw_data_subset is not None and not raw_data_subset.empty:
+        # Check that 'imbalance' column exists
+        if "imbalance" in raw_data_subset.columns:
+            # We assume all rows in raw_data_subset have the same 'times' as 'row'
+            # Convert series of arrays to 2D numpy array
+            try:
+                # stack rows -> (N_realizations, N_t)
+                imb_matrix = np.stack(raw_data_subset["imbalance"].values)
+                # Verify time dimension
+                if imb_matrix.shape[1] == len(times):
+                    print("Using RAW")
+                    bootstrap_mean, bootstrap_std = bootstrap_beta_from_raw(
+                        times,
+                        imb_matrix,
+                        fit_window=fit_window,
+                        n_samples=bootstrap_samples,
+                        min_points=min_points,
+                        random_state=random_state,
+                    )
+            except Exception as e:
+                print(
+                    f"Warning: Failed to bootstrap from raw data for L={row['L']}, h={row['h']}: {e}"
+                )
+
+    # Fallback to parametric bootstrap if raw failed or not provided
+    if (
+        (math.isnan(bootstrap_mean) or math.isnan(bootstrap_std))
+        and sigma_log is not None
+        and np.any(np.isfinite(sigma_log))
+    ):
         bootstrap_mean, bootstrap_std = bootstrap_beta(
             log_t,
             log_imb,
@@ -446,7 +555,7 @@ def plot_beta_vs_h(
         L_val: color for L_val, color in zip(unique_L, selected_colors, strict=False)
     }
 
-    fit_label_added = False # Added this line
+    fit_label_added = False  # Added this line
     for L in unique_L:
         subset_all = df[df["L"] == L].sort_values("h")
         allowed_h = ALLOWED_H_BY_L.get(int(L))
@@ -551,11 +660,7 @@ def plot_beta_vs_h(
                 cov = fit_res.covariance
                 if cov is not None and cov.shape == (2, 2) and np.all(np.isfinite(cov)):
                     # Var[log(beta)] = J Cov J^T with J = [h, 1]
-                    log_var = (
-                        cov[0, 0] * h_line**2
-                        + 2 * cov[0, 1] * h_line
-                        + cov[1, 1]
-                    )
+                    log_var = cov[0, 0] * h_line**2 + 2 * cov[0, 1] * h_line + cov[1, 1]
                     log_var = np.maximum(log_var, 0)
                     sigma_beta = beta_line * np.sqrt(log_var)
                     lower = np.clip(beta_line - sigma_beta, a_min=1e-12, a_max=None)
@@ -590,7 +695,7 @@ def plot_beta_vs_h(
             continue
 
         color = window["color"]
-        label = r"$h_c$ range estimate" if not window_label_added else None
+        label = r"$h_c$ est." if not window_label_added else None
         window_label_added = True
 
         if upper > lower:
@@ -620,8 +725,8 @@ def plot_beta_vs_h(
             )
     ax.grid(True, ls="--", alpha=0.3)
     ax.legend(
-        frameon=True, # Show frame
-        framealpha=0.9, # Set alpha for the frame
+        frameon=True,  # Show frame
+        framealpha=0.9,  # Set alpha for the frame
         loc="best",
     )
 
@@ -641,6 +746,7 @@ def plot_beta_vs_h(
 def main(
     *,
     averaged_data_path: Path = Path("..") / "subset_data_averaged.pkl",
+    raw_data_path: Optional[Path] = None,
     fit_window: Tuple[float, float] = FIT_WINDOW_DEFAULT,
     min_points: int = MIN_POINTS_DEFAULT,
     bootstrap_samples: int = BOOTSTRAP_SAMPLES_DEFAULT,
@@ -648,6 +754,14 @@ def main(
 ) -> pd.DataFrame:
     """Entry point: run fits for all available (L, h) combinations."""
     df = load_averaged_data(str(averaged_data_path), verbose=False)
+
+    df_raw = None
+    if raw_data_path is not None and raw_data_path.exists():
+        print(f"Loading raw data for resampling from: {raw_data_path}")
+        df_raw = load_from_pickle(str(raw_data_path), verbose=False)
+        # Ensure column mapping if needed, or just use raw names.
+        # Raw names expected: 'graph_L', 'model_h', 'initial_state_initial_maxdim', 'imbalance'
+
     results = []
     failures = []
 
@@ -655,11 +769,21 @@ def main(
         if not _is_allowed_h(row["L"], row["h"]):
             continue
         try:
+            raw_subset = None
+            if df_raw is not None:
+                # Filter for matching L, h (and maxdim if present)
+                # Note: raw dataframe uses 'graph_L', 'model_h'
+                mask = (df_raw["graph_L"] == row["L"]) & (df_raw["model_h"] == row["h"])
+                if "maxdim" in row and "initial_state_initial_maxdim" in df_raw.columns:
+                    mask &= df_raw["initial_state_initial_maxdim"] == row["maxdim"]
+                raw_subset = df_raw[mask]
+
             res = fit_single_row(
                 row,
                 fit_window=fit_window,
                 min_points=min_points,
                 bootstrap_samples=bootstrap_samples,
+                raw_data_subset=raw_subset,
             )
             results.append(res)
 
@@ -674,7 +798,12 @@ def main(
             )
         except Exception as exc:  # noqa: BLE001 - report any failure
             failures.append(
-                {"L": row["L"], "h": row["h"], "maxdim": row.get("maxdim"), "error": str(exc)}
+                {
+                    "L": row["L"],
+                    "h": row["h"],
+                    "maxdim": row.get("maxdim"),
+                    "error": str(exc),
+                }
             )
 
     if failures:
@@ -847,7 +976,9 @@ def fit_beta_curve_lm(
 
     h = np.asarray(h, dtype=float)[mask]
     beta = np.asarray(beta, dtype=float)[mask]
-    sigma_beta = None if sigma_beta is None else np.asarray(sigma_beta, dtype=float)[mask]
+    sigma_beta = (
+        None if sigma_beta is None else np.asarray(sigma_beta, dtype=float)[mask]
+    )
 
     if h.size < 2:
         raise FitError("Not enough points for exponential β(h) fit.")
@@ -922,5 +1053,7 @@ def fit_beta_curve_lm(
         n_points=h.size,
         thresholds=threshold_map,
     )
+
+
 if __name__ == "__main__":
     main()

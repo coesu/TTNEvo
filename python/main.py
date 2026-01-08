@@ -139,6 +139,7 @@ def ensure_beta_fits(reuse: bool, quiet: bool) -> pd.DataFrame:
     print("[run] Fitting imbalance decay (log-log regression)")
     results_df = run_beta_fits(
         averaged_data_path=AVERAGED_PKL,
+        raw_data_path=SUBSET_PKL,
     )
     if quiet:
         print(f"[done] Saved beta fit outputs under {PLOT_DIR}")
@@ -244,6 +245,7 @@ def main() -> None:
         quiet=args.quiet,
     )
 
+    print(bootstrap_summary)
     # ensure_h_vs_L_plot(
     #     weighted_summary,
     #     output_path=H_VS_L_PNG,

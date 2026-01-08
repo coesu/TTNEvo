@@ -270,8 +270,8 @@ function plot_L12_comparison_diff(df::DataFrame; h_values, grid)
     error_mps = []
     error_ttn = []
 
-    mean_num_size_mps = []
-    mean_num_size_ttn = []
+    diff_num_size_mps = []
+    diff_num_size_ttn = []
 
     runtimes_mps = []
     runtimes_ttn = []
@@ -281,7 +281,7 @@ function plot_L12_comparison_diff(df::DataFrame; h_values, grid)
       m_next = h_mps[i+1, :]
       min_len = min(length(m_curr.imbalance), length(m_next.imbalance))
       push!(error_mps, mean(abs.(m_curr.imbalance[1:min_len] .- m_next.imbalance[1:min_len])))
-      push!(mean_num_size_mps, mean(m_curr.num_size))
+      push!(diff_num_size_mps, abs(mean(m_next.num_size) - mean(m_curr.num_size)))
       push!(runtimes_mps, mean(m_curr.ex_times))
     end
 
@@ -290,7 +290,7 @@ function plot_L12_comparison_diff(df::DataFrame; h_values, grid)
       t_next = h_ttn[i+1, :]
       min_len = min(length(t_curr.imbalance), length(t_next.imbalance))
       push!(error_ttn, mean(abs.(t_curr.imbalance[1:min_len] .- t_next.imbalance[1:min_len])))
-      push!(mean_num_size_ttn, mean(t_curr.num_size))
+      push!(diff_num_size_ttn, abs(mean(t_next.num_size) - mean(t_curr.num_size)))
       push!(runtimes_ttn, mean(t_curr.ex_times))
     end
 
@@ -305,16 +305,16 @@ function plot_L12_comparison_diff(df::DataFrame; h_values, grid)
     push!(axes_error, ax_err)
     ax_err.ylabel = L"\epsilon_\chi"
     if row_idx == length(h_values)
-      ax_err.xlabel = L"Number of parameters/$10^5$"
+      ax_err.xlabel = L"\Delta \text{Parameters}/10^5"
     else
       hidexdecorations!(ax_err, grid=false)
     end
 
-    lines!(ax_err, mean_num_size_mps ./ 1e5, error_mps; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
-    lines!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
+    lines!(ax_err, diff_num_size_mps ./ 1e5, error_mps; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
+    lines!(ax_err, diff_num_size_ttn ./ 1e5, error_ttn; color=:black, linewidth=1.0, transparency=true, alpha=0.5)
 
     colorbarmax = 400
-    scatter!(ax_err, mean_num_size_ttn ./ 1e5, error_ttn;
+    scatter!(ax_err, diff_num_size_ttn ./ 1e5, error_ttn;
       color=round.(runtimes_ttn),
       colormap=default_colorscheme(),
       colorrange=(20, colorbarmax),
@@ -325,7 +325,7 @@ function plot_L12_comparison_diff(df::DataFrame; h_values, grid)
       strokewidth=0.8,
       label=row_idx == 1 ? "TTN" : nothing,
     )
-    scatter!(ax_err, mean_num_size_mps ./ 1e5, error_mps;
+    scatter!(ax_err, diff_num_size_mps ./ 1e5, error_mps;
       color=round.(runtimes_mps),
       colormap=default_colorscheme(),
       colorrange=(20, colorbarmax),
